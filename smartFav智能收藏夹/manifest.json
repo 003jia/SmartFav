@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "SmartFav - AI智能收藏夹",
+  "version": "1.0.0",
+  "description": "AI驱动的智能网页收藏夹，自动分类网页内容",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  }
+}

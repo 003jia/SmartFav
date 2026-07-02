@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartFav - AI智能收藏夹</title>
+  <link rel="stylesheet" href="styles/popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 头部 -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">⭐</span>
+        <span class="logo-text">SmartFav</span>
+      </div>
+      <button class="settings-btn" id="settingsBtn" title="设置">⚙️</button>
+    </header>
+
+    <!-- 收藏状态 -->
+    <div id="statusSection" class="status-section">
+      <div id="loadingStatus" class="status loading">
+        <span class="spinner"></span>
+        <span>正在分析网页...</span>
+      </div>
+      <div id="successStatus" class="status success hidden">
+        <span>✓ 收藏成功</span>
+      </div>
+      <div id="errorStatus" class="status error hidden">
+        <span id="errorMsg">出错了</span>
+      </div>
+    </div>
+
+    <!-- 分类建议 -->
+    <div id="categorySection" class="category-section hidden">
+      <div class="section-title">AI 分类建议</div>
+      <div class="category-card">
+        <div class="category-icon">📁</div>
+        <div class="category-info">
+          <div class="category-name" id="suggestedCategory">视频网站</div>
+          <div class="category-summary" id="categorySummary">B站是一个知名的视频分享平台</div>
+        </div>
+      </div>
+      <div class="tags" id="tagsContainer">
+        <span class="tag">视频</span>
+        <span class="tag">弹幕</span>
+      </div>
+      <button class="btn btn-primary" id="confirmBtn">确认收藏</button>
+    </div>
+
+    <!-- 最近收藏 -->
+    <div class="recent-section" id="recentSection">
+      <div class="section-title">
+        <span>最近收藏</span>
+        <span class="view-all" id="viewAllBtn">查看全部 →</span>
+      </div>
+      <div class="recent-list" id="recentList">
+        <!-- 最近收藏将在这里渲染 -->
+      </div>
+    </div>
+
+    <!-- 收藏夹列表 -->
+    <div class="folders-section">
+      <div class="section-title">我的收藏夹</div>
+      <div class="folders-list" id="foldersList">
+        <div class="folder-item" data-category="视频">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">视频</span>
+          <span class="folder-count">(0)</span>
+        </div>
+        <div class="folder-item" data-category="编程">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">编程</span>
+          <span class="folder-count">(0)</span>
+        </div>
+        <div class="folder-item" data-category="工具">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">工具</span>
+          <span class="folder-count">(0)</span>
+        </div>
+        <div class="folder-item" data-category="学习">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">学习</span>
+          <span class="folder-count">(0)</span>
+        </div>
+        <div class="folder-item" data-category="资讯">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">资讯</span>
+          <span class="folder-count">(0)</span>
+        </div>
+        <div class="folder-item" data-category="其他">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">其他</span>
+          <span class="folder-count">(0)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
