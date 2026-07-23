@@ -3,100 +3,148 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SmartFav - AI智能收藏夹</title>
-  <link rel="stylesheet" href="styles/popup.css">
+  <title>SmartFav</title>
+  <link rel="stylesheet" href="styles/popup.css?v=1.1.3">
 </head>
 <body>
-  <div class="container">
-    <!-- 头部 -->
+  <div class="app-shell">
     <header class="header">
-      <div class="logo">
-        <span class="logo-icon">⭐</span>
-        <span class="logo-text">SmartFav</span>
+      <div class="brand-block">
+        <div class="brand">SmartFav</div>
+        <div class="brand-caption" id="brandCaption">收藏当前网页</div>
       </div>
-      <button class="settings-btn" id="settingsBtn" title="设置">⚙️</button>
+      <button class="text-button" id="settingsBtn" type="button" aria-label="打开设置">设置</button>
     </header>
 
-    <!-- 收藏状态 -->
-    <div id="statusSection" class="status-section">
-      <div id="loadingStatus" class="status loading">
-        <span class="spinner"></span>
-        <span>正在分析网页...</span>
-      </div>
-      <div id="successStatus" class="status success hidden">
-        <span>✓ 收藏成功</span>
-      </div>
-      <div id="errorStatus" class="status error hidden">
-        <span id="errorMsg">出错了</span>
-      </div>
-    </div>
+    <main id="mainView">
+      <section id="loadingStatus" class="notice notice-loading" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>正在读取当前网页</span>
+      </section>
 
-    <!-- 分类建议 -->
-    <div id="categorySection" class="category-section hidden">
-      <div class="section-title">AI 分类建议</div>
-      <div class="category-card">
-        <div class="category-icon">📁</div>
-        <div class="category-info">
-          <div class="category-name" id="suggestedCategory">视频网站</div>
-          <div class="category-summary" id="categorySummary">B站是一个知名的视频分享平台</div>
-        </div>
-      </div>
-      <div class="tags" id="tagsContainer">
-        <span class="tag">视频</span>
-        <span class="tag">弹幕</span>
-      </div>
-      <button class="btn btn-primary" id="confirmBtn">确认收藏</button>
-    </div>
+      <section id="successStatus" class="notice notice-success hidden" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>已保存到收藏夹</span>
+      </section>
 
-    <!-- 最近收藏 -->
-    <div class="recent-section" id="recentSection">
-      <div class="section-title">
-        <span>最近收藏</span>
-        <span class="view-all" id="viewAllBtn">查看全部 →</span>
-      </div>
-      <div class="recent-list" id="recentList">
-        <!-- 最近收藏将在这里渲染 -->
-      </div>
-    </div>
+      <section id="errorStatus" class="notice notice-error hidden" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="errorMsg">当前页面暂时无法收藏</span>
+      </section>
 
-    <!-- 收藏夹列表 -->
-    <div class="folders-section">
-      <div class="section-title">我的收藏夹</div>
-      <div class="folders-list" id="foldersList">
-        <div class="folder-item" data-category="视频">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">视频</span>
-          <span class="folder-count">(0)</span>
+      <section id="categorySection" class="save-card hidden" aria-labelledby="saveTitle">
+        <div class="page-preview">
+          <div class="page-copy">
+            <h1 id="saveTitle" class="page-title">当前网页</h1>
+            <p id="pageHost" class="page-host">example.com</p>
+          </div>
         </div>
-        <div class="folder-item" data-category="编程">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">编程</span>
-          <span class="folder-count">(0)</span>
+
+        <div class="classification-head">
+          <span class="field-label">保存到</span>
+          <span id="sourceBadge" class="source-badge">本地规则</span>
         </div>
-        <div class="folder-item" data-category="工具">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">工具</span>
-          <span class="folder-count">(0)</span>
+
+        <label class="select-wrap" for="categorySelect">
+          <select id="categorySelect" aria-label="选择收藏分类"></select>
+        </label>
+        <p id="categorySummary" class="match-summary">正在查找匹配关键词</p>
+        <div id="tagsContainer" class="tags" aria-label="匹配到的关键词"></div>
+
+        <div id="aiMessage" class="inline-message hidden" aria-live="polite"></div>
+        <div class="action-row">
+          <button class="button button-secondary hidden" id="enhanceBtn" type="button">AI 优化</button>
+          <button class="button button-primary" id="confirmBtn" type="button">收藏网页</button>
         </div>
-        <div class="folder-item" data-category="学习">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">学习</span>
-          <span class="folder-count">(0)</span>
+        <p id="privacyHint" class="privacy-hint">分类在浏览器本地完成，不会发送网页内容。</p>
+      </section>
+
+      <section class="library-entry" aria-labelledby="libraryTitle">
+        <div>
+          <h2 id="libraryTitle">我的收藏</h2>
+          <p id="librarySummary">0 条收藏</p>
         </div>
-        <div class="folder-item" data-category="资讯">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">资讯</span>
-          <span class="folder-count">(0)</span>
-        </div>
-        <div class="folder-item" data-category="其他">
-          <span class="folder-icon">📁</span>
-          <span class="folder-name">其他</span>
-          <span class="folder-count">(0)</span>
-        </div>
+        <button class="library-toggle" id="libraryToggleBtn" type="button" aria-expanded="false" aria-controls="libraryPanel">展开</button>
+      </section>
+
+      <div id="libraryPanel" class="library-panel hidden">
+        <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
+          <div class="section-heading">
+            <h2 id="recentTitle">最近收藏</h2>
+            <button class="link-button" id="viewAllBtn" type="button">查看全部</button>
+          </div>
+          <div class="recent-list" id="recentList"></div>
+        </section>
+
+        <section class="content-section folders-section" aria-labelledby="foldersTitle">
+          <div class="section-heading">
+            <h2 id="foldersTitle">收藏分类</h2>
+            <span id="totalCount" class="total-count">0 条</span>
+          </div>
+          <div class="folders-list" id="foldersList"></div>
+        </section>
       </div>
-    </div>
+    </main>
+
+    <section id="settingsView" class="settings-view hidden" aria-labelledby="compactSettingsTitle">
+      <div class="settings-intro">
+        <h1 id="compactSettingsTitle">插件设置</h1>
+        <p>本地关键词分类始终开启，AI 只在你主动使用时调用。</p>
+      </div>
+
+      <label class="compact-toggle" for="compactAiEnabled">
+        <span>
+          <strong>AI 增强</strong>
+          <small>可选，不影响基础收藏</small>
+        </span>
+        <input id="compactAiEnabled" type="checkbox">
+      </label>
+
+      <div id="compactAiFields" class="compact-fields hidden">
+        <label class="compact-field" for="compactProvider">
+          <span>AI 服务</span>
+          <select id="compactProvider">
+            <option value="ollama">Ollama（本机免费）</option>
+            <option value="openrouter">OpenRouter 免费路由</option>
+            <option value="minimax">MiniMax</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+
+        <label class="compact-field" for="compactModel">
+          <span>模型</span>
+          <input id="compactModel" type="text" autocomplete="off" placeholder="模型名称">
+        </label>
+
+        <label class="compact-field" id="compactApiKeyField" for="compactApiKey">
+          <span>API Key</span>
+          <input id="compactApiKey" type="password" autocomplete="off" placeholder="仅保存在浏览器本地">
+        </label>
+
+        <button class="compact-test-button" id="compactTestBtn" type="button">测试连接</button>
+      </div>
+
+      <label class="compact-field category-field" for="compactCategories">
+        <span>收藏分类</span>
+        <input id="compactCategories" type="text" placeholder="视频, 编程, 工具, 学习, 资讯, 其他">
+      </label>
+
+      <details class="compact-details">
+        <summary>关键词规则</summary>
+        <label class="compact-field" for="compactKeywordRules">
+          <span>每行格式：分类=关键词</span>
+          <textarea id="compactKeywordRules" rows="7" spellcheck="false"></textarea>
+        </label>
+      </details>
+
+      <div id="compactSettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
+      <button class="button button-primary compact-save" id="compactSaveBtn" type="button">保存设置</button>
+    </section>
   </div>
 
-  <script src="popup.js"></script>
+  <script src="classifier.js?v=1.1.0"></script>
+  <script src="ai-client.js?v=1.1.0"></script>
+  <script src="popup.js?v=1.1.3"></script>
 </body>
 </html>

@@ -1,425 +1,491 @@
-// SmartFav Popup - 弹出窗口逻辑
+const DEFAULT_SETTINGS = {
+  aiEnabled: false,
+  apiProvider: 'ollama',
+  apiKey: '',
+  model: 'qwen2.5:3b',
+  categories: SmartFavClassifier.DEFAULT_CATEGORIES,
+  keywordRules: SmartFavClassifier.DEFAULT_RULES
+};
 
-// DOM 元素
+const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.storage && chrome.tabs);
+const previewState = {
+  settings: DEFAULT_SETTINGS,
+  favorites: [
+    {
+      title: 'GitHub · Build and ship software',
+      url: 'https://github.com/',
+      category: '编程',
+      summary: '代码托管与协作平台',
+      createdAt: Date.now() - 3600000
+    },
+    {
+      title: 'MDN Web Docs',
+      url: 'https://developer.mozilla.org/',
+      category: '学习',
+      summary: 'Web 开发文档',
+      createdAt: Date.now() - 7200000
+    }
+  ]
+};
+
 const elements = {
   settingsBtn: document.getElementById('settingsBtn'),
+  brandCaption: document.getElementById('brandCaption'),
+  mainView: document.getElementById('mainView'),
+  settingsView: document.getElementById('settingsView'),
   loadingStatus: document.getElementById('loadingStatus'),
   successStatus: document.getElementById('successStatus'),
   errorStatus: document.getElementById('errorStatus'),
   errorMsg: document.getElementById('errorMsg'),
   categorySection: document.getElementById('categorySection'),
-  suggestedCategory: document.getElementById('suggestedCategory'),
+  saveTitle: document.getElementById('saveTitle'),
+  pageHost: document.getElementById('pageHost'),
+  categorySelect: document.getElementById('categorySelect'),
   categorySummary: document.getElementById('categorySummary'),
+  sourceBadge: document.getElementById('sourceBadge'),
   tagsContainer: document.getElementById('tagsContainer'),
   confirmBtn: document.getElementById('confirmBtn'),
+  enhanceBtn: document.getElementById('enhanceBtn'),
+  aiMessage: document.getElementById('aiMessage'),
+  privacyHint: document.getElementById('privacyHint'),
   foldersList: document.getElementById('foldersList'),
-  recentSection: document.getElementById('recentSection'),
+  totalCount: document.getElementById('totalCount'),
+  librarySummary: document.getElementById('librarySummary'),
+  libraryPanel: document.getElementById('libraryPanel'),
+  libraryToggleBtn: document.getElementById('libraryToggleBtn'),
   recentList: document.getElementById('recentList'),
-  viewAllBtn: document.getElementById('viewAllBtn')
+  viewAllBtn: document.getElementById('viewAllBtn'),
+  compactAiEnabled: document.getElementById('compactAiEnabled'),
+  compactAiFields: document.getElementById('compactAiFields'),
+  compactProvider: document.getElementById('compactProvider'),
+  compactModel: document.getElementById('compactModel'),
+  compactApiKey: document.getElementById('compactApiKey'),
+  compactApiKeyField: document.getElementById('compactApiKeyField'),
+  compactCategories: document.getElementById('compactCategories'),
+  compactKeywordRules: document.getElementById('compactKeywordRules'),
+  compactTestBtn: document.getElementById('compactTestBtn'),
+  compactSettingsStatus: document.getElementById('compactSettingsStatus'),
+  compactSaveBtn: document.getElementById('compactSaveBtn')
 };
 
-// 状态
 let currentTabInfo = null;
-let aiSuggestion = null;
+let currentSuggestion = null;
+let currentSettings = DEFAULT_SETTINGS;
 
-// 初始化
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadSettings();
+  currentSettings = await loadSettings();
+  await Promise.all([renderFolders(), renderRecentFavorites()]);
   await analyzeCurrentTab();
-  await renderFolders();
-  await renderRecentFavorites();
+  if (new URLSearchParams(window.location.search).get('view') === 'settings') {
+    toggleSettingsView(true);
+  }
 });
 
-// 加载设置
-async function loadSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['settings'], (result) => {
-      if (!result.settings) {
-        // 默认设置
-        const defaultSettings = {
-          apiProvider: 'minimax',
-          apiKey: '',
-          model: 'MiniMax-M2.5',
-          categories: ['视频', '编程', '工具', '学习', '资讯', '其他']
-        };
-        chrome.storage.local.set({ settings: defaultSettings });
-      }
-      resolve(result.settings);
-    });
-  });
+function storageGet(keys) {
+  if (!isExtension) {
+    const result = {};
+    keys.forEach((key) => { result[key] = previewState[key]; });
+    return Promise.resolve(result);
+  }
+  return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
 }
 
-// 分析当前标签页
+function storageSet(values) {
+  if (!isExtension) {
+    Object.assign(previewState, values);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+async function loadSettings() {
+  const result = await storageGet(['settings']);
+  const saved = result.settings || {};
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    aiEnabled: typeof saved.aiEnabled === 'boolean' ? saved.aiEnabled : Boolean(saved.apiKey),
+    categories: Array.isArray(saved.categories) && saved.categories.length
+      ? saved.categories
+      : DEFAULT_SETTINGS.categories,
+    keywordRules: SmartFavClassifier.mergeRules(
+      Array.isArray(saved.categories) && saved.categories.length ? saved.categories : DEFAULT_SETTINGS.categories,
+      saved.keywordRules
+    )
+  };
+  if (!result.settings) await storageSet({ settings });
+  return settings;
+}
+
 async function analyzeCurrentTab() {
   try {
-    // 获取当前标签页
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('about:')) {
-      showError('无法分析此页面');
-      return;
+    if (isExtension) {
+      const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+      const tab = tabs[0];
+      if (!tab || !isSupportedUrl(tab.url)) {
+        showError('这个浏览器页面暂时无法收藏');
+        return;
+      }
+      const pageContent = await getPageContent(tab.id);
+      currentTabInfo = {
+        url: tab.url,
+        title: tab.title || getHostname(tab.url),
+        favicon: tab.favIconUrl || '',
+        description: pageContent.description || ''
+      };
+    } else {
+      currentTabInfo = {
+        url: 'https://github.com/openai/codex',
+        title: 'openai/codex · GitHub',
+        favicon: '',
+        description: 'An open-source coding agent for software development.'
+      };
     }
 
-    // 获取页面信息
-    currentTabInfo = {
-      url: tab.url,
-      title: tab.title,
-      favicon: tab.favIconUrl
-    };
-
-    // 获取页面内容摘要
-    const pageContent = await getPageContent(tab.id);
-    currentTabInfo.description = pageContent.description;
-
-    // 调用 AI 分析
-    await analyzeWithAI(currentTabInfo);
-
+    currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+    showCategorySuggestion(currentSuggestion);
   } catch (error) {
-    console.error('分析失败:', error);
-    showError('分析失败: ' + error.message);
+    console.error('读取网页失败:', error);
+    showError('读取当前网页失败，请稍后再试');
   }
 }
 
-// 获取页面内容
-async function getPageContent(tabId) {
-  try {
-    // 注入脚本获取页面内容
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tabId },
+function isSupportedUrl(url) {
+  return Boolean(url) && !/^(chrome|edge|about|chrome-extension):/.test(url);
+}
+
+function getPageContent(tabId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript({
+      target: { tabId },
       func: () => {
         const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
-        const ogTitle = document.querySelector('meta[property="og:title"]')?.content || '';
-        const bodyText = document.body?.innerText?.substring(0, 1000) || '';
-        
-        return {
-          description: metaDescription || ogTitle || bodyText.substring(0, 200)
-        };
+        const ogDescription = document.querySelector('meta[property="og:description"]')?.content || '';
+        const bodyText = document.body?.innerText?.slice(0, 1200) || '';
+        return { description: metaDescription || ogDescription || bodyText.slice(0, 320) };
       }
+    }, (results) => {
+      if (chrome.runtime.lastError) {
+        resolve({ description: '' });
+        return;
+      }
+      resolve(results && results[0] && results[0].result ? results[0].result : { description: '' });
     });
-    
-    return results[0]?.result || { description: '' };
-  } catch (error) {
-    return { description: '' };
-  }
-}
-
-// AI 分析
-async function analyzeWithAI(tabInfo) {
-  const settings = await loadSettings();
-  
-  if (!settings.apiKey) {
-    showError('请先在设置中配置 API Key');
-    return;
-  }
-
-  try {
-    const prompt = buildClassificationPrompt(tabInfo);
-    const response = await callAIApi(prompt, settings);
-    
-    // 解析 AI 响应
-    aiSuggestion = parseAIResponse(response);
-    
-    // 显示分类建议
-    showCategorySuggestion(aiSuggestion);
-    
-  } catch (error) {
-    console.error('AI 分析失败:', error);
-    showError('AI 分析失败');
-  }
-}
-
-// 构建分类提示词
-function buildClassificationPrompt(tabInfo) {
-  return `你是一个网页分类助手。用户收藏了一个网页，请根据内容分类。
-
-网页信息：
-- 标题: ${tabInfo.title}
-- 描述: ${tabInfo.description}
-- URL: ${tabInfo.url}
-
-请返回以下格式的JSON（直接返回JSON，不要其他内容）：
-{
-  "category": "分类名称",
-  "tags": ["标签1", "标签2"],
-  "summary": "一句话描述"
-}
-
-分类选项：视频, 编程, 工具, 学习, 资讯, 文档, 娱乐, 购物, 社交, 其他`;
-}
-
-// 调用 AI API
-async function callAIApi(prompt, settings) {
-  const apiConfigs = {
-    minimax: {
-      url: 'https://api.minimaxi.com/v1/text/chatcompletion_v2',
-      body: {
-        model: settings.model || 'MiniMax-M2.5',
-        messages: [{ role: 'user', content: prompt }]
-      }
-    },
-    openai: {
-      url: 'https://api.openai.com/v1/chat/completions',
-      body: {
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }]
-      }
-    },
-    deepseek: {
-      url: 'https://api.deepseek.com/v1/chat/completions',
-      body: {
-        model: 'deepseek-chat',
-        messages: [{ role: 'user', content: prompt }]
-      }
-    }
-  };
-
-  const config = apiConfigs[settings.apiProvider];
-  
-  const response = await fetch(config.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${settings.apiKey}`
-    },
-    body: JSON.stringify(config.body)
   });
-
-  if (!response.ok) {
-    throw new Error(`API 请求失败: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
 }
 
-// 解析 AI 响应
-function parseAIResponse(response) {
-  try {
-    // 尝试提取 JSON
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    throw new Error('无法解析响应');
-  } catch (error) {
-    // 默认值
-    return {
-      category: '其他',
-      tags: [],
-      summary: '未能分析内容'
-    };
-  }
-}
-
-// 显示分类建议
 function showCategorySuggestion(suggestion) {
   elements.loadingStatus.classList.add('hidden');
+  elements.errorStatus.classList.add('hidden');
   elements.categorySection.classList.remove('hidden');
-  
-  elements.suggestedCategory.textContent = suggestion.category;
-  elements.categorySummary.textContent = suggestion.summary;
-  
-  // 渲染标签
-  elements.tagsContainer.innerHTML = suggestion.tags
-    .map(tag => `<span class="tag">${tag}</span>`)
+  elements.saveTitle.textContent = currentTabInfo.title || '未命名网页';
+  elements.pageHost.textContent = getHostname(currentTabInfo.url);
+  elements.categorySelect.innerHTML = currentSettings.categories
+    .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
     .join('');
+  elements.categorySelect.value = currentSettings.categories.includes(suggestion.category)
+    ? suggestion.category
+    : currentSettings.categories[currentSettings.categories.length - 1];
+  elements.categorySummary.textContent = suggestion.summary;
+  elements.tagsContainer.innerHTML = suggestion.tags
+    .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+    .join('');
+  elements.sourceBadge.textContent = suggestion.source === 'ai' ? 'AI 增强' : '本地规则';
+  elements.sourceBadge.classList.toggle('ai', suggestion.source === 'ai');
+  elements.enhanceBtn.classList.toggle('hidden', !currentSettings.aiEnabled);
+  elements.privacyHint.textContent = suggestion.source === 'ai'
+    ? '本次内容已发送给你配置的 AI 服务。'
+    : '分类在浏览器本地完成，不会发送网页内容。';
+  updateConfirmLabel();
 }
 
-// 确认收藏
-elements.confirmBtn?.addEventListener('click', async () => {
-  if (!aiSuggestion || !currentTabInfo) return;
-  
+function updateConfirmLabel() {
+  const category = elements.categorySelect.value || '收藏夹';
+  elements.confirmBtn.textContent = `收藏到“${category}”`;
+}
+
+elements.categorySelect.addEventListener('change', () => {
+  if (currentSuggestion) currentSuggestion.category = elements.categorySelect.value;
+  updateConfirmLabel();
+});
+
+elements.enhanceBtn.addEventListener('click', async () => {
+  if (!currentTabInfo || !currentSettings.aiEnabled) return;
+  elements.enhanceBtn.disabled = true;
+  elements.enhanceBtn.textContent = '优化中';
+  elements.aiMessage.classList.add('hidden');
+  try {
+    const response = await SmartFavAI.call(buildClassificationPrompt(currentTabInfo), currentSettings);
+    const suggestion = parseAIResponse(response);
+    currentSuggestion = suggestion;
+    showCategorySuggestion(suggestion);
+  } catch (error) {
+    elements.aiMessage.textContent = `${error.message}，已保留本地分类结果。`;
+    elements.aiMessage.classList.remove('hidden');
+  } finally {
+    elements.enhanceBtn.disabled = false;
+    elements.enhanceBtn.textContent = 'AI 优化';
+  }
+});
+
+function buildClassificationPrompt(tabInfo) {
+  return `请将网页归入给定分类，并只返回 JSON。\n\n网页标题：${tabInfo.title}\n网页地址：${tabInfo.url}\n网页描述：${tabInfo.description}\n可选分类：${currentSettings.categories.join('、')}\n\nJSON 格式：{"category":"分类","tags":["关键词"],"summary":"简短理由"}`;
+}
+
+function parseAIResponse(response) {
+  const match = String(response || '').match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI 返回内容无法识别');
+  const parsed = JSON.parse(match[0]);
+  const fallback = currentSettings.categories.includes('其他')
+    ? '其他'
+    : currentSettings.categories[currentSettings.categories.length - 1];
+  return {
+    category: currentSettings.categories.includes(parsed.category) ? parsed.category : fallback,
+    tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 4).map(String) : [],
+    summary: String(parsed.summary || 'AI 已完成分类优化'),
+    source: 'ai'
+  };
+}
+
+elements.confirmBtn.addEventListener('click', async () => {
+  if (!currentSuggestion || !currentTabInfo) return;
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
   const favorite = {
     ...currentTabInfo,
-    category: aiSuggestion.category,
-    tags: aiSuggestion.tags,
-    summary: aiSuggestion.summary,
+    category: elements.categorySelect.value,
+    tags: currentSuggestion.tags,
+    summary: currentSuggestion.summary,
+    classificationSource: currentSuggestion.source,
     createdAt: Date.now()
   };
-  
-  // 保存收藏
-  const { favorites = [] } = await chrome.storage.local.get(['favorites']);
-  favorites.unshift(favorite);
-  await chrome.storage.local.set({ favorites });
-  
-  // 显示成功
+  const withoutDuplicate = favorites.filter((item) => item.url !== favorite.url);
+  await storageSet({ favorites: [favorite, ...withoutDuplicate] });
   elements.categorySection.classList.add('hidden');
   elements.successStatus.classList.remove('hidden');
-  
-  // 刷新列表
-  await renderFolders();
-  
-  // 2秒后关闭
-  setTimeout(() => {
-    window.close();
-  }, 1500);
+  await Promise.all([renderFolders(), renderRecentFavorites()]);
+  if (isExtension) setTimeout(() => window.close(), 1100);
 });
 
-// 渲染收藏夹列表
 async function renderFolders() {
-  const { favorites = [], settings } = await chrome.storage.local.get(['favorites', 'settings']);
-  const categories = settings?.categories || ['视频', '编程', '工具', '学习', '资讯', '其他'];
-  
-  // 统计每个分类的数量
-  const counts = {};
-  categories.forEach(cat => counts[cat] = 0);
-  favorites.forEach(fav => {
-    if (counts[fav.category] !== undefined) {
-      counts[fav.category]++;
-    }
+  const result = await storageGet(['favorites', 'settings']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const categories = result.settings && Array.isArray(result.settings.categories) && result.settings.categories.length
+    ? result.settings.categories
+    : currentSettings.categories;
+  const counts = Object.fromEntries(categories.map((category) => [category, 0]));
+  favorites.forEach((favorite) => {
+    if (Object.prototype.hasOwnProperty.call(counts, favorite.category)) counts[favorite.category] += 1;
   });
-  
-  // 更新显示
-  elements.foldersList.innerHTML = categories.map(cat => `
-    <div class="folder-item" data-category="${cat}">
-      <span class="folder-icon">📁</span>
-      <span class="folder-name">${cat}</span>
-      <span class="folder-count">(${counts[cat] || 0})</span>
-    </div>
+  elements.totalCount.textContent = `${favorites.length} 条`;
+  elements.librarySummary.textContent = `${favorites.length} 条收藏 · ${categories.length} 个分类`;
+  elements.foldersList.classList.remove('list-view');
+  elements.foldersList.innerHTML = categories.map((category) => `
+    <button class="folder-item" type="button" data-category="${escapeHtml(category)}">
+      <span class="folder-name">${escapeHtml(category)}</span>
+      <span class="folder-count">${counts[category] || 0}</span>
+    </button>
   `).join('');
-  
-  // 添加点击事件 - 显示该分类的收藏内容
-  document.querySelectorAll('.folder-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const category = item.dataset.category;
-      showFavoritesByCategory(category, favorites);
-    });
+  elements.foldersList.querySelectorAll('.folder-item').forEach((item) => {
+    item.addEventListener('click', () => showFavoritesByCategory(item.dataset.category, favorites));
   });
 }
 
-// 渲染最近收藏
 async function renderRecentFavorites() {
-  const { favorites = [] } = await chrome.storage.local.get(['favorites']);
-  
-  // 只显示最近5条
-  const recent = favorites.slice(0, 5);
-  
-  if (recent.length === 0) {
-    elements.recentList.innerHTML = '<div class="empty-recent">暂无收藏</div>';
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const recent = favorites.slice(0, 3);
+  if (!recent.length) {
+    elements.recentList.innerHTML = '<div class="empty-state">还没有收藏，先保存当前网页吧</div>';
     return;
   }
-  
-  elements.recentList.innerHTML = recent.map(fav => `
-    <div class="recent-item" data-url="${fav.url}">
-      <img src="${fav.favicon || ''}" class="favicon" onerror="this.style.display='none'">
-      <div class="recent-info">
-        <div class="recent-title">${fav.title}</div>
-        <div class="recent-category">${fav.category}</div>
-      </div>
-    </div>
-  `).join('');
-  
-  // 点击收藏项打开链接
-  document.querySelectorAll('.recent-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const url = item.dataset.url;
-      if (url) chrome.tabs.create({ url });
-    });
-  });
+  elements.recentList.innerHTML = recent.map(renderFavoriteRow).join('');
+  bindFavoriteLinks(elements.recentList);
 }
 
-// 显示全部收藏
 async function showAllFavorites() {
-  const { favorites = [] } = await chrome.storage.local.get(['favorites']);
-  
-  if (favorites.length === 0) {
-    elements.foldersList.innerHTML = `
-      <div class="empty-message">
-        <p>暂无收藏</p>
-        <button class="back-btn" id="backToFolders">返回</button>
-      </div>
-    `;
-  } else {
-    elements.foldersList.innerHTML = `
-      <div class="category-header">
-        <button class="back-btn" id="backToFolders">← 返回</button>
-        <span class="category-title">全部收藏 (${favorites.length})</span>
-      </div>
-      ${favorites.map(fav => `
-        <div class="favorite-item" data-url="${fav.url}">
-          <img src="${fav.favicon || ''}" class="favicon" onerror="this.style.display='none'">
-          <div class="favorite-info">
-            <div class="favorite-title">${fav.title}</div>
-            <div class="favorite-meta">
-              <span class="favorite-category-tag">${fav.category}</span>
-              <span class="favorite-summary">${fav.summary || ''}</span>
-            </div>
-          </div>
-        </div>
-      `).join('')}
-    `;
-  }
-  
-  // 返回按钮事件
-  document.getElementById('backToFolders')?.addEventListener('click', () => {
-    renderFolders();
-  });
-  
-  // 点击收藏项打开链接
-  document.querySelectorAll('.favorite-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const url = item.dataset.url;
-      if (url) chrome.tabs.create({ url });
-    });
-  });
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  renderFavoriteList('全部收藏', favorites);
 }
 
-// 查看全部按钮事件
-elements.viewAllBtn?.addEventListener('click', () => {
-  showAllFavorites();
-});
-
-// 显示指定分类的收藏内容
 function showFavoritesByCategory(category, favorites) {
-  const filtered = favorites.filter(fav => fav.category === category);
-  
-  if (filtered.length === 0) {
-    elements.foldersList.innerHTML = `
-      <div class="empty-message">
-        <p>暂无收藏</p>
-        <button class="back-btn" id="backToFolders">返回</button>
-      </div>
-    `;
-  } else {
-    elements.foldersList.innerHTML = `
-      <div class="category-header">
-        <button class="back-btn" id="backToFolders">← 返回</button>
-        <span class="category-title">${category}</span>
-      </div>
-      ${filtered.map(fav => `
-        <div class="favorite-item" data-url="${fav.url}">
-          <img src="${fav.favicon || ''}" class="favicon" onerror="this.style.display='none'">
-          <div class="favorite-info">
-            <div class="favorite-title">${fav.title}</div>
-            <div class="favorite-summary">${fav.summary || ''}</div>
-          </div>
-        </div>
-      `).join('')}
-    `;
-  }
-  
-  // 返回按钮事件
-  document.getElementById('backToFolders')?.addEventListener('click', () => {
-    renderFolders();
+  renderFavoriteList(category, favorites.filter((favorite) => favorite.category === category));
+}
+
+function renderFavoriteList(title, favorites) {
+  elements.foldersList.classList.add('list-view');
+  elements.foldersList.innerHTML = `
+    <div class="category-header">
+      <button class="back-button" id="backToFolders" type="button">返回</button>
+      <span class="category-title">${escapeHtml(title)} · ${favorites.length}</span>
+    </div>
+    ${favorites.length ? favorites.map(renderFavoriteRow).join('') : '<div class="empty-state">这个分类还是空的</div>'}
+  `;
+  document.getElementById('backToFolders').addEventListener('click', renderFolders);
+  bindFavoriteLinks(elements.foldersList);
+}
+
+function renderFavoriteRow(favorite) {
+  const image = favorite.favicon
+    ? `<img src="${escapeHtml(favorite.favicon)}" class="favicon" alt="">`
+    : '';
+  return `
+    <button class="recent-item favorite-link" type="button" data-url="${escapeHtml(favorite.url)}">
+      ${image}
+      <span class="recent-info">
+        <span class="recent-title">${escapeHtml(favorite.title || '未命名网页')}</span>
+        <span class="recent-category">${escapeHtml(favorite.category || '其他')}</span>
+      </span>
+    </button>
+  `;
+}
+
+function bindFavoriteLinks(container) {
+  container.querySelectorAll('.favicon').forEach((image) => {
+    image.addEventListener('error', () => image.remove(), { once: true });
   });
-  
-  // 点击收藏项打开链接
-  document.querySelectorAll('.favorite-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const url = item.dataset.url;
-      if (url) chrome.tabs.create({ url });
-    });
+  container.querySelectorAll('.favorite-link').forEach((item) => {
+    item.addEventListener('click', () => openUrl(item.dataset.url));
   });
 }
 
-// 显示错误
+function openUrl(url) {
+  if (!url) return;
+  if (isExtension) chrome.tabs.create({ url });
+  else window.open(url, '_blank', 'noopener');
+}
+
 function showError(message) {
   elements.loadingStatus.classList.add('hidden');
+  elements.categorySection.classList.add('hidden');
   elements.errorStatus.classList.remove('hidden');
   elements.errorMsg.textContent = message;
 }
 
-// 打开设置
-elements.settingsBtn?.addEventListener('click', () => {
-  chrome.runtime.openOptionsPage();
+function getHostname(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch (_) {
+    return '当前网页';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+elements.viewAllBtn.addEventListener('click', showAllFavorites);
+elements.libraryToggleBtn.addEventListener('click', () => {
+  const willExpand = elements.libraryPanel.classList.contains('hidden');
+  elements.libraryPanel.classList.toggle('hidden', !willExpand);
+  elements.libraryToggleBtn.textContent = willExpand ? '收起' : '展开';
+  elements.libraryToggleBtn.setAttribute('aria-expanded', String(willExpand));
 });
+elements.settingsBtn.addEventListener('click', () => toggleSettingsView());
+
+function toggleSettingsView(forceOpen) {
+  const shouldOpen = typeof forceOpen === 'boolean'
+    ? forceOpen
+    : elements.settingsView.classList.contains('hidden');
+  elements.mainView.classList.toggle('hidden', shouldOpen);
+  elements.settingsView.classList.toggle('hidden', !shouldOpen);
+  elements.settingsBtn.textContent = shouldOpen ? '返回' : '设置';
+  elements.settingsBtn.setAttribute('aria-label', shouldOpen ? '返回收藏' : '打开设置');
+  elements.brandCaption.textContent = shouldOpen ? '插件设置' : '收藏当前网页';
+  if (shouldOpen) populateCompactSettings();
+}
+
+function populateCompactSettings() {
+  elements.compactAiEnabled.checked = currentSettings.aiEnabled;
+  elements.compactProvider.value = currentSettings.apiProvider || 'ollama';
+  elements.compactModel.value = currentSettings.model || SmartFavAI.getProvider(elements.compactProvider.value).model;
+  elements.compactApiKey.value = currentSettings.apiKey || '';
+  elements.compactCategories.value = currentSettings.categories.join(', ');
+  elements.compactKeywordRules.value = SmartFavClassifier.rulesToText(
+    currentSettings.categories,
+    currentSettings.keywordRules
+  );
+  elements.compactSettingsStatus.textContent = '';
+  elements.compactSettingsStatus.className = 'compact-settings-status';
+  updateCompactAIFields(false);
+}
+
+function updateCompactAIFields(resetModel) {
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
+  elements.compactAiFields.classList.toggle('hidden', !elements.compactAiEnabled.checked);
+  elements.compactApiKeyField.classList.toggle('hidden', !provider.requiresKey);
+  if (resetModel || !elements.compactModel.value.trim()) elements.compactModel.value = provider.model;
+}
+
+function getCompactCategories() {
+  return [...new Set(elements.compactCategories.value
+    .split(/[,，]/)
+    .map((category) => category.trim())
+    .filter(Boolean))];
+}
+
+elements.compactAiEnabled.addEventListener('change', () => updateCompactAIFields(false));
+elements.compactProvider.addEventListener('change', () => updateCompactAIFields(true));
+
+elements.compactSaveBtn.addEventListener('click', async () => {
+  const categories = getCompactCategories();
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
+  if (!categories.length) {
+    showCompactSettingsStatus('请至少保留一个收藏分类', 'error');
+    return;
+  }
+  if (elements.compactAiEnabled.checked && provider.requiresKey && !elements.compactApiKey.value.trim()) {
+    showCompactSettingsStatus('请填写所选服务的 API Key', 'error');
+    return;
+  }
+  currentSettings = {
+    aiEnabled: elements.compactAiEnabled.checked,
+    apiProvider: elements.compactProvider.value,
+    apiKey: elements.compactApiKey.value.trim(),
+    model: elements.compactModel.value.trim() || provider.model,
+    categories,
+    keywordRules: SmartFavClassifier.textToRules(elements.compactKeywordRules.value, categories)
+  };
+  await storageSet({ settings: currentSettings });
+  await renderFolders();
+  if (currentTabInfo) {
+    currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+    showCategorySuggestion(currentSuggestion);
+  }
+  showCompactSettingsStatus('设置已保存', 'success');
+});
+
+elements.compactTestBtn.addEventListener('click', async () => {
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
+  if (provider.requiresKey && !elements.compactApiKey.value.trim()) {
+    showCompactSettingsStatus('请先填写 API Key', 'error');
+    return;
+  }
+  elements.compactTestBtn.disabled = true;
+  elements.compactTestBtn.textContent = '测试中';
+  try {
+    const response = await SmartFavAI.call('只返回 JSON：{"status":"ok"}', {
+      apiProvider: elements.compactProvider.value,
+      apiKey: elements.compactApiKey.value.trim(),
+      model: elements.compactModel.value.trim() || provider.model
+    });
+    if (!response) throw new Error('服务没有返回内容');
+    showCompactSettingsStatus('连接成功', 'success');
+  } catch (error) {
+    showCompactSettingsStatus(error.message, 'error');
+  } finally {
+    elements.compactTestBtn.disabled = false;
+    elements.compactTestBtn.textContent = '测试连接';
+  }
+});
+
+function showCompactSettingsStatus(message, type) {
+  elements.compactSettingsStatus.textContent = message;
+  elements.compactSettingsStatus.className = `compact-settings-status ${type}`;
+}
