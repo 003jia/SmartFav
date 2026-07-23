@@ -102,6 +102,22 @@
     return { status: 'created', id: created.id };
   }
 
+  // 开启浏览器收藏同步后，只删除 SmartFav 受管目录内的同网址记录。
+  // 用户在其他浏览器文件夹中手工保存的同网址收藏不属于 SmartFav，不应误删。
+  async function removeFavorite(url, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) return { status: 'disabled', removed: 0 };
+    if (!api) return { status: 'unavailable', removed: 0 };
+
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return { status: 'invalid', removed: 0 };
+    const matches = (await collectManagedBookmarks(api))
+      .filter((item) => item.url === normalizedUrl);
+    for (const match of matches) {
+      await callApi(api, 'remove', match.id);
+    }
+    return { status: 'removed', removed: matches.length };
+  }
+
   // 收集浏览器收藏夹中所有不在 SmartFav 文件夹内的书签
   async function collectExternalBookmarks(api) {
     const tree = await callApi(api, 'getTree');
@@ -221,6 +237,7 @@
     flattenBookmarks,
     findUrlMatches,
     writeFavorite,
+    removeFavorite,
     collectExternalBookmarks,
     collectManagedBookmarks,
     isInsideSmartFavFolder,

@@ -163,6 +163,39 @@ async function recoverManagedFavorites() {
   };
 }
 
+// 删除由 SmartFav 管理的收藏。开启浏览器同步时，先删除浏览器侧记录；
+// 只有浏览器操作成功后才更新本地 storage，避免两边状态失配。
+async function deleteFavorite(url) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) return { status: 'invalid', removed: 0, browserRemoved: 0 };
+
+  const { settings, favorites } = await getStoredState();
+  const nextFavorites = favorites.filter((item) => item.url !== normalizedUrl);
+  const removed = favorites.length - nextFavorites.length;
+  if (!removed) return { status: 'ok', removed: 0, browserRemoved: 0 };
+
+  let browserRemoved = 0;
+  if (settings.browserBookmarksEnabled) {
+    const browserResult = await SmartFavBookmarks.removeFavorite(
+      normalizedUrl,
+      settings,
+      chrome.bookmarks
+    );
+    if (browserResult.status === 'unavailable') {
+      throw new Error('Browser favorites are unavailable');
+    }
+    browserRemoved = browserResult.removed || 0;
+  }
+
+  await setStoredFavorites(nextFavorites);
+  return {
+    status: 'ok',
+    removed,
+    browserRemoved,
+    syncEnabled: Boolean(settings.browserBookmarksEnabled)
+  };
+}
+
 // 整理浏览器收藏夹：读取全部书签 → 本地分类 → 导入 SmartFav 分类；
 // 仅当"允许整理浏览器收藏夹"开启时才把书签移动进 SmartFav/分类 文件夹
 async function organizeBrowserBookmarks() {
@@ -296,6 +329,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(result.favorites || []);
         });
       });
+    return true;
+  }
+
+  if (message.type === 'deleteFavorite') {
+    deleteFavorite(message.url)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
     return true;
   }
   

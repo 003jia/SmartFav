@@ -546,19 +546,45 @@ function bindFavoriteActions(container) {
   container.querySelectorAll('.favorite-delete-button').forEach((button) => {
     button.addEventListener('click', async () => {
       button.disabled = true;
-      await deleteFavorite(button.dataset.url);
+      const deleted = await deleteFavorite(button.dataset.url);
+      if (!deleted) button.disabled = false;
     });
   });
 }
 
 async function deleteFavorite(url) {
-  if (!url) return;
-  const result = await storageGet(['favorites']);
-  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
-  const nextFavorites = favorites.filter((favorite) => favorite.url !== url);
-  if (nextFavorites.length === favorites.length) return;
-  await storageSet({ favorites: nextFavorites });
-  await Promise.all([renderFolders(), renderRecentFavorites()]);
+  if (!url) return false;
+  try {
+    if (isExtension) {
+      const response = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'deleteFavorite', url }, (result) => {
+          const runtimeError = chrome.runtime.lastError;
+          resolve(runtimeError
+            ? { status: 'error', message: runtimeError.message }
+            : result);
+        });
+      });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message
+          ? response.message
+          : t('browserBookmarkUnavailable'));
+      }
+    } else {
+      const result = await storageGet(['favorites']);
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      await storageSet({
+        favorites: favorites.filter((favorite) => favorite.url !== url)
+      });
+    }
+    elements.errorStatus.classList.add('hidden');
+    await Promise.all([renderFolders(), renderRecentFavorites()]);
+    return true;
+  } catch (error) {
+    console.error('Favorite delete failed:', error);
+    elements.errorMsg.textContent = t('deleteSyncFailed', { message: error.message });
+    elements.errorStatus.classList.remove('hidden');
+    return false;
+  }
 }
 
 function openUrl(url) {

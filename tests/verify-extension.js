@@ -23,7 +23,7 @@ const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.6.5');
+  assert.equal(manifest.version, '1.6.6');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -64,6 +64,9 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /recoverManagedFavorites/);
   assert.match(backgroundJs, /collectManagedBookmarks/);
   assert.match(popupJs, /type:\s*'recoverManagedFavorites'/);
+  assert.match(backgroundJs, /SmartFavBookmarks\.removeFavorite/);
+  assert.match(backgroundJs, /message\.type === 'deleteFavorite'/);
+  assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
   assert.match(backgroundJs, /bookmarkOrganizeEnabled/);
   assert.match(backgroundJs, /bookmarkAutoCaptureEnabled/);
   assert.doesNotMatch(
@@ -106,6 +109,8 @@ function verifyManifestAndLocales() {
     i18n.MESSAGES.en.browserFolderNote,
     /never deletes/
   );
+  assert.match(i18n.MESSAGES.zh_CN.browserBookmarksHint, /收藏或删除/);
+  assert.match(i18n.MESSAGES.en.browserBookmarksHint, /saving or deleting/);
   assert.match(popupCss, /html,\s*body\s*\{[^}]*width:\s*360px;[^}]*min-width:\s*360px;/s);
   assert.match(popupCss, /html,\s*body\s*\{[^}]*border-radius:\s*var\(--shell-radius\);[^}]*overflow:\s*hidden;/s);
   assert.match(popupCss, /body\s*\{[^}]*padding:\s*0;[^}]*contain:\s*paint;/s);
@@ -302,6 +307,47 @@ async function verifyBookmarkModes() {
     api
   );
   assert.equal(disabled.status, 'disabled');
+
+  // 同步删除只移除 SmartFav 受管目录中的同网址书签，不误删外部同网址收藏。
+  const removalApi = createMockBookmarks();
+  const removalSettings = {
+    browserBookmarksEnabled: true,
+    bookmarkWriteMode: 'add'
+  };
+  await browserBookmarks.writeFavorite(
+    { title: 'Managed one', url: 'https://remove.example.com', category: 'Tools' },
+    removalSettings,
+    removalApi
+  );
+  await browserBookmarks.writeFavorite(
+    { title: 'Managed two', url: 'https://remove.example.com', category: 'Learning' },
+    removalSettings,
+    removalApi
+  );
+  const externalCopy = await new Promise((resolve) => removalApi.create(
+    { title: 'External copy', url: 'https://remove.example.com' },
+    resolve
+  ));
+  const removed = await browserBookmarks.removeFavorite(
+    'https://remove.example.com',
+    removalSettings,
+    removalApi
+  );
+  assert.equal(removed.status, 'removed');
+  assert.equal(removed.removed, 2);
+  const remainingCopies = [...removalApi.nodes.values()]
+    .filter((node) => node.url === 'https://remove.example.com');
+  assert.equal(remainingCopies.length, 1);
+  assert.equal(remainingCopies[0].id, externalCopy.id);
+
+  const disabledRemoval = await browserBookmarks.removeFavorite(
+    externalCopy.url,
+    { browserBookmarksEnabled: false },
+    removalApi
+  );
+  assert.equal(disabledRemoval.status, 'disabled');
+  assert.equal(disabledRemoval.removed, 0);
+  assert.ok(removalApi.nodes.has(externalCopy.id));
 }
 
 async function verifyOrganizeBookmarks() {
@@ -530,6 +576,86 @@ async function verifyBackgroundBookmarkFlows() {
   );
   assert.equal(repeatedRecovery.recovered, 0);
   assert.equal(recoveryHarness.state.favorites.length, 2);
+
+  // 开启同步时，插件删除先移除 SmartFav 受管浏览器收藏，再删除本地记录；
+  // 外部文件夹中的同网址收藏继续保留。
+  const syncedDeleteUrl = 'https://delete-sync.example.com';
+  const syncedDeleteHarness = createBackgroundHarness(
+    { ...baseSettings, browserBookmarksEnabled: true },
+    [{
+      title: 'Delete with sync',
+      url: syncedDeleteUrl,
+      category: 'Tools',
+      createdAt: 1
+    }]
+  );
+  await browserBookmarks.writeFavorite(
+    {
+      title: 'Delete with sync',
+      url: syncedDeleteUrl,
+      category: 'Tools'
+    },
+    syncedDeleteHarness.state.settings,
+    syncedDeleteHarness.bookmarks
+  );
+  const externalDeleteCopy = await createBookmark(syncedDeleteHarness.bookmarks, {
+    title: 'Keep external copy',
+    url: syncedDeleteUrl
+  });
+  const syncedDeleteResult = await sendBackgroundMessage(
+    syncedDeleteHarness,
+    { type: 'deleteFavorite', url: syncedDeleteUrl }
+  );
+  assert.equal(syncedDeleteResult.status, 'ok');
+  assert.equal(syncedDeleteResult.removed, 1);
+  assert.equal(syncedDeleteResult.browserRemoved, 1);
+  assert.equal(syncedDeleteHarness.state.favorites.length, 0);
+  const syncedDeleteMatches = [...syncedDeleteHarness.bookmarks.nodes.values()]
+    .filter((node) => node.url === syncedDeleteUrl);
+  assert.equal(syncedDeleteMatches.length, 1);
+  assert.equal(syncedDeleteMatches[0].id, externalDeleteCopy.id);
+
+  // 关闭同步时只删除 SmartFav 本地记录，浏览器收藏保持不变。
+  const localDeleteUrl = 'https://delete-local.example.com';
+  const localDeleteHarness = createBackgroundHarness(
+    baseSettings,
+    [{
+      title: 'Delete locally',
+      url: localDeleteUrl,
+      category: 'Other',
+      createdAt: 1
+    }]
+  );
+  const localBrowserCopy = await createBookmark(localDeleteHarness.bookmarks, {
+    title: 'Keep browser copy',
+    url: localDeleteUrl
+  });
+  const localDeleteResult = await sendBackgroundMessage(
+    localDeleteHarness,
+    { type: 'deleteFavorite', url: localDeleteUrl }
+  );
+  assert.equal(localDeleteResult.status, 'ok');
+  assert.equal(localDeleteResult.browserRemoved, 0);
+  assert.equal(localDeleteHarness.state.favorites.length, 0);
+  assert.ok(localDeleteHarness.bookmarks.nodes.has(localBrowserCopy.id));
+
+  // 浏览器同步失败时不能先删本地记录，否则会产生不可恢复的不一致。
+  const failedDeleteHarness = createBackgroundHarness(
+    { ...baseSettings, browserBookmarksEnabled: true },
+    [{
+      title: 'Keep on failure',
+      url: 'https://delete-failure.example.com',
+      category: 'Other',
+      createdAt: 1
+    }]
+  );
+  failedDeleteHarness.context.chrome.bookmarks = null;
+  const failedDeleteResult = await sendBackgroundMessage(
+    failedDeleteHarness,
+    { type: 'deleteFavorite', url: 'https://delete-failure.example.com' }
+  );
+  assert.equal(failedDeleteResult.status, 'error');
+  assert.equal(failedDeleteHarness.state.favorites.length, 1);
 
   // 即使关闭普通写入，"立即整理"仍会读取浏览器收藏并仅导入 SmartFav。
   const localHarness = createBackgroundHarness(baseSettings, [{
