@@ -333,7 +333,21 @@ select:focus-visible {
 }
 
 .brand-block {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brand-logo {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  box-shadow: 0 1px 4px rgba(20, 45, 110, 0.28);
+}
+
+.brand-copy {
+  min-width: 0;
 }
 
 .brand {
@@ -368,6 +382,7 @@ select:focus-visible {
   border-radius: 5px;
   background: transparent;
   font-size: 12px;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
 .language-button {
@@ -547,6 +562,30 @@ select:focus-visible {
   cursor: pointer;
   font-size: 14px;
   font-weight: 650;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.16s ease;
+}
+
+.select-wrap {
+  position: relative;
+}
+
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-68%) rotate(45deg);
+  pointer-events: none;
+}
+
+.select-wrap select:hover {
+  border-color: var(--primary);
 }
 
 .match-summary,
@@ -605,12 +644,13 @@ select:focus-visible {
 
 .button-primary {
   flex: 1;
-  background: var(--primary);
+  background: linear-gradient(180deg, var(--primary), var(--primary-hover));
   color: var(--primary-contrast);
 }
 
 .button-primary:hover {
   background: var(--primary-hover);
+  box-shadow: 0 3px 10px var(--focus-ring);
 }
 
 .button-secondary {
@@ -707,6 +747,7 @@ select:focus-visible {
   gap: 10px;
   padding: 8px 7px;
   border-radius: 10px;
+  transition: background 0.16s ease;
 }
 
 .recent-item:hover,
@@ -793,6 +834,12 @@ select:focus-visible {
   cursor: pointer;
   font-size: 10px;
   font-weight: 650;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.library-toggle:hover {
+  border-color: var(--tag-line);
+  background: var(--tag-bg);
 }
 
 .library-panel {
@@ -1114,6 +1161,14 @@ select:focus-visible {
   font-weight: 650;
 }
 
+.compact-test-button {
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.compact-test-button:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+
 .compact-test-button:disabled {
   cursor: wait;
   opacity: 0.62;
@@ -1165,6 +1220,11 @@ select:focus-visible {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface-soft);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.folder-item:hover {
+  border-color: var(--tag-line);
 }
 
 .folder-name {
@@ -1216,4 +1276,28 @@ select:focus-visible {
 
 .favorite-item:hover {
   background: var(--surface-soft);
+}
+
+/* ---------- 外观细节：统一细滚动条 ---------- */
+.library-panel::-webkit-scrollbar,
+.settings-view::-webkit-scrollbar {
+  width: 8px;
+}
+
+.library-panel::-webkit-scrollbar-thumb,
+.settings-view::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-color: var(--control-line);
+  background-clip: content-box;
+}
+
+.library-panel::-webkit-scrollbar-thumb:hover,
+.settings-view::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted);
+}
+
+.library-panel::-webkit-scrollbar-track,
+.settings-view::-webkit-scrollbar-track {
+  background: transparent;
 }

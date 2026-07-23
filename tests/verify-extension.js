@@ -23,11 +23,17 @@ const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.6.6');
+  assert.equal(manifest.version, '1.6.7');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
   assert.ok(manifest.permissions.includes('bookmarks'));
+  ['16', '32', '48', '128'].forEach((size) => {
+    assert.equal(manifest.icons[size], `icons/icon${size}.png`);
+    assert.equal(manifest.action.default_icon[size], `icons/icon${size}.png`);
+    assert.ok(fs.existsSync(path.join(extensionRoot, `icons/icon${size}.png`)), `missing icons/icon${size}.png`);
+  });
+  assert.match(popupHtml, /class="brand-logo" src="icons\/icon32\.png"/);
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.equal(manifest.action.default_title, '__MSG_actionTitle__');
   assert.equal(manifest.web_accessible_resources, undefined);
