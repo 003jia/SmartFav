@@ -4,81 +4,86 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.1.3">
+  <link rel="stylesheet" href="styles/popup.css?v=1.6.4">
 </head>
 <body>
   <div class="app-shell">
     <header class="header">
       <div class="brand-block">
         <div class="brand">SmartFav</div>
-        <div class="brand-caption" id="brandCaption">收藏当前网页</div>
+        <div class="brand-caption" id="brandCaption" data-i18n="saveCurrentPage">收藏当前网页</div>
       </div>
-      <button class="text-button" id="settingsBtn" type="button" aria-label="打开设置">设置</button>
+      <div class="header-actions">
+        <button class="text-button mode-button" id="modeBtn" type="button" aria-label="切换到暗色模式">暗</button>
+        <button class="text-button language-button" id="languageBtn" type="button" aria-label="Switch to English">EN</button>
+        <button class="text-button" id="settingsBtn" type="button" data-i18n="settings" data-i18n-aria-label="openSettings" aria-label="打开设置">设置</button>
+      </div>
     </header>
 
     <main id="mainView">
       <section id="loadingStatus" class="notice notice-loading" aria-live="polite">
         <span class="spinner" aria-hidden="true"></span>
-        <span>正在读取当前网页</span>
+        <span data-i18n="loadingPage">正在读取当前网页</span>
       </section>
 
       <section id="successStatus" class="notice notice-success hidden" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
-        <span>已保存到收藏夹</span>
+        <span id="successMsg" data-i18n="savedToSmartFav">已保存到 SmartFav</span>
       </section>
 
       <section id="errorStatus" class="notice notice-error hidden" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
-        <span id="errorMsg">当前页面暂时无法收藏</span>
+        <span id="errorMsg" data-i18n="unsupportedPage">当前页面暂时无法收藏</span>
       </section>
 
       <section id="categorySection" class="save-card hidden" aria-labelledby="saveTitle">
         <div class="page-preview">
           <div class="page-copy">
+            <span class="page-context-label" data-i18n="currentPageLabel">当前网页</span>
             <h1 id="saveTitle" class="page-title">当前网页</h1>
             <p id="pageHost" class="page-host">example.com</p>
           </div>
         </div>
 
         <div class="classification-head">
-          <span class="field-label">保存到</span>
-          <span id="sourceBadge" class="source-badge">本地规则</span>
+          <span class="field-label" data-i18n="saveTo">保存到</span>
+          <span id="sourceBadge" class="source-badge" data-i18n="localRules">本地规则</span>
         </div>
 
         <label class="select-wrap" for="categorySelect">
-          <select id="categorySelect" aria-label="选择收藏分类"></select>
+          <select id="categorySelect" data-i18n-aria-label="selectCategory" aria-label="选择收藏分类"></select>
         </label>
-        <p id="categorySummary" class="match-summary">正在查找匹配关键词</p>
-        <div id="tagsContainer" class="tags" aria-label="匹配到的关键词"></div>
+        <p id="categorySummary" class="match-summary" data-i18n="findingKeywords">正在查找匹配关键词</p>
+        <div id="tagsContainer" class="tags" data-i18n-aria-label="matchedKeywords" aria-label="匹配到的关键词"></div>
 
         <div id="aiMessage" class="inline-message hidden" aria-live="polite"></div>
         <div class="action-row">
-          <button class="button button-secondary hidden" id="enhanceBtn" type="button">AI 优化</button>
-          <button class="button button-primary" id="confirmBtn" type="button">收藏网页</button>
+          <button class="button button-secondary hidden" id="enhanceBtn" type="button" data-i18n="aiOptimize">AI 优化</button>
+          <button class="button button-primary" id="confirmBtn" type="button" data-i18n="savePage">收藏网页</button>
         </div>
-        <p id="privacyHint" class="privacy-hint">分类在浏览器本地完成，不会发送网页内容。</p>
+        <p id="privacyHint" class="privacy-hint" data-i18n="privacyLocal">分类在浏览器本地完成，不会发送网页内容。</p>
       </section>
 
       <section class="library-entry" aria-labelledby="libraryTitle">
         <div>
-          <h2 id="libraryTitle">我的收藏</h2>
+          <h2 id="libraryTitle" data-i18n="myFavorites">我的收藏</h2>
           <p id="librarySummary">0 条收藏</p>
         </div>
-        <button class="library-toggle" id="libraryToggleBtn" type="button" aria-expanded="false" aria-controls="libraryPanel">展开</button>
+        <button class="library-toggle" id="libraryToggleBtn" type="button" aria-expanded="false" aria-controls="libraryPanel" data-i18n="expand">展开</button>
       </section>
 
       <div id="libraryPanel" class="library-panel hidden">
         <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
           <div class="section-heading">
-            <h2 id="recentTitle">最近收藏</h2>
-            <button class="link-button" id="viewAllBtn" type="button">查看全部</button>
+            <h2 id="recentTitle" data-i18n="recentFavorites">最近收藏</h2>
+            <button class="link-button" id="viewAllBtn" type="button" data-i18n="viewAll">查看全部</button>
           </div>
           <div class="recent-list" id="recentList"></div>
         </section>
 
         <section class="content-section folders-section" aria-labelledby="foldersTitle">
           <div class="section-heading">
-            <h2 id="foldersTitle">收藏分类</h2>
+            <h2 id="foldersTitle" data-i18n="favoriteCategories">收藏分类</h2>
             <span id="totalCount" class="total-count">0 条</span>
           </div>
           <div class="folders-list" id="foldersList"></div>
@@ -88,24 +93,44 @@
 
     <section id="settingsView" class="settings-view hidden" aria-labelledby="compactSettingsTitle">
       <div class="settings-intro">
-        <h1 id="compactSettingsTitle">插件设置</h1>
-        <p>本地关键词分类始终开启，AI 只在你主动使用时调用。</p>
+        <h1 id="compactSettingsTitle" data-i18n="extensionSettings">插件设置</h1>
+        <p data-i18n="settingsIntro">本地关键词分类始终开启，AI 和浏览器收藏同步均按需使用。</p>
+      </div>
+
+      <div class="appearance-fields">
+        <label class="compact-field" for="compactThemeStyle">
+          <span data-i18n="appearanceStyle">界面风格</span>
+          <select id="compactThemeStyle">
+            <option value="glass" data-i18n="styleGlass">毛玻璃（默认）</option>
+            <option value="white" data-i18n="styleWhite">纯白</option>
+            <option value="gray" data-i18n="styleGray">灰色</option>
+            <option value="black" data-i18n="styleBlack">黑色</option>
+            <option value="parchment" data-i18n="styleParchment">羊皮纸</option>
+          </select>
+        </label>
+        <label class="appearance-toggle" for="compactDarkMode">
+          <span>
+            <strong data-i18n="darkMode">暗色模式</strong>
+            <small data-i18n="colorModeHint">可在顶栏快速切换明暗</small>
+          </span>
+          <input id="compactDarkMode" type="checkbox">
+        </label>
       </div>
 
       <label class="compact-toggle" for="compactAiEnabled">
         <span>
-          <strong>AI 增强</strong>
-          <small>可选，不影响基础收藏</small>
+          <strong data-i18n="aiEnhance">AI 增强</strong>
+          <small data-i18n="aiOptional">可选，不影响基础收藏</small>
         </span>
         <input id="compactAiEnabled" type="checkbox">
       </label>
 
       <div id="compactAiFields" class="compact-fields hidden">
         <label class="compact-field" for="compactProvider">
-          <span>AI 服务</span>
+          <span data-i18n="aiService">AI 服务</span>
           <select id="compactProvider">
-            <option value="ollama">Ollama（本机免费）</option>
-            <option value="openrouter">OpenRouter 免费路由</option>
+            <option value="ollama" data-i18n="ollamaFree">Ollama（本机免费）</option>
+            <option value="openrouter" data-i18n="openrouterFree">OpenRouter 免费路由</option>
             <option value="minimax">MiniMax</option>
             <option value="deepseek">DeepSeek</option>
             <option value="openai">OpenAI</option>
@@ -113,38 +138,82 @@
         </label>
 
         <label class="compact-field" for="compactModel">
-          <span>模型</span>
-          <input id="compactModel" type="text" autocomplete="off" placeholder="模型名称">
+          <span data-i18n="model">模型</span>
+          <input id="compactModel" type="text" autocomplete="off" data-i18n-placeholder="modelPlaceholder" placeholder="模型名称">
         </label>
 
         <label class="compact-field" id="compactApiKeyField" for="compactApiKey">
           <span>API Key</span>
-          <input id="compactApiKey" type="password" autocomplete="off" placeholder="仅保存在浏览器本地">
+          <input id="compactApiKey" type="password" autocomplete="off" data-i18n-placeholder="apiKeyLocal" placeholder="仅保存在浏览器本地">
         </label>
 
-        <button class="compact-test-button" id="compactTestBtn" type="button">测试连接</button>
+        <button class="compact-test-button" id="compactTestBtn" type="button" data-i18n="testConnection">测试连接</button>
       </div>
 
-      <label class="compact-field category-field" for="compactCategories">
-        <span>收藏分类</span>
-        <input id="compactCategories" type="text" placeholder="视频, 编程, 工具, 学习, 资讯, 其他">
+      <label class="compact-toggle" for="compactBrowserBookmarksEnabled">
+        <span>
+          <strong data-i18n="browserBookmarks">写入浏览器收藏夹</strong>
+          <small data-i18n="browserBookmarksHint">从 SmartFav 收藏网页时同步写入浏览器分类</small>
+        </span>
+        <input id="compactBrowserBookmarksEnabled" type="checkbox">
       </label>
 
-      <details class="compact-details">
-        <summary>关键词规则</summary>
-        <label class="compact-field" for="compactKeywordRules">
-          <span>每行格式：分类=关键词</span>
-          <textarea id="compactKeywordRules" rows="7" spellcheck="false"></textarea>
+      <div id="compactBookmarkFields" class="compact-fields hidden">
+        <label class="compact-field" for="compactBookmarkWriteMode">
+          <span data-i18n="bookmarkWriteMode">同网址处理方式</span>
+          <select id="compactBookmarkWriteMode">
+            <option value="overwrite" data-i18n="overwriteSameUrl">覆盖同网址</option>
+            <option value="add" data-i18n="alwaysAdd">始终新增</option>
+          </select>
         </label>
-      </details>
+      </div>
+      <label class="compact-toggle" for="compactBookmarkOrganizeEnabled">
+        <span>
+          <strong data-i18n="organizeBookmarks">允许整理浏览器收藏夹</strong>
+          <small data-i18n="organizeBookmarksHint">开启后立即整理现有收藏，之后新增星标也会自动归类</small>
+        </span>
+        <input id="compactBookmarkOrganizeEnabled" type="checkbox">
+      </label>
+      <label class="compact-toggle" for="compactBookmarkAutoCapture">
+        <span>
+          <strong data-i18n="autoCaptureBookmarks">自动获取浏览器收藏</strong>
+          <small data-i18n="autoCaptureBookmarksHint">点击星标后自动加入 SmartFav；允许整理时同时移动到浏览器分类</small>
+        </span>
+        <input id="compactBookmarkAutoCapture" type="checkbox">
+      </label>
+      <div class="bookmark-actions">
+        <button class="compact-test-button" id="compactOrganizeBtn" type="button" data-i18n="organizeNow">立即整理收藏夹</button>
+        <p class="compact-note" data-i18n="browserFolderNote">整理只移动网址收藏，不删除内容；SmartFav 文件夹内的记录不会重复处理。</p>
+      </div>
+
+      <section class="category-manager" aria-labelledby="categoryManagerTitle">
+        <div class="category-manager-heading">
+          <h2 id="categoryManagerTitle" data-i18n="categoryFolders">分类文件夹</h2>
+          <p data-i18n="categoryFoldersHint">添加文件夹，并为每个文件夹设置匹配关键词。</p>
+        </div>
+        <div class="category-add-row">
+          <input
+            id="compactNewCategory"
+            type="text"
+            autocomplete="off"
+            data-i18n-placeholder="newCategoryPlaceholder"
+            data-i18n-aria-label="newCategoryPlaceholder"
+            placeholder="输入新文件夹名称"
+          >
+          <button id="compactAddCategoryBtn" type="button" data-i18n="addCategory">添加</button>
+        </div>
+        <div id="categoryRulesList" class="category-rules-list"></div>
+      </section>
 
       <div id="compactSettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
-      <button class="button button-primary compact-save" id="compactSaveBtn" type="button">保存设置</button>
+      <button class="button button-primary compact-save" id="compactSaveBtn" type="button" data-i18n="saveSettings">保存设置</button>
     </section>
   </div>
 
-  <script src="classifier.js?v=1.1.0"></script>
-  <script src="ai-client.js?v=1.1.0"></script>
-  <script src="popup.js?v=1.1.3"></script>
+  <script src="i18n.js?v=1.6.4"></script>
+  <script src="classifier.js?v=1.6.4"></script>
+  <script src="browser-bookmarks.js?v=1.6.4"></script>
+  <script src="ai-client.js?v=1.6.4"></script>
+  <script src="popup.js?v=1.6.4"></script>
 </body>
 </html>

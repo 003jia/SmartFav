@@ -1,14 +1,43 @@
 (function attachClassifier(globalScope) {
-  const DEFAULT_CATEGORIES = ['视频', '编程', '工具', '学习', '资讯', '其他'];
-
-  const DEFAULT_RULES = {
-    视频: ['视频', '直播', '电影', '影视', '弹幕', 'bilibili', 'youtube', 'youku', 'iqiyi', 'douyin'],
-    编程: ['编程', '代码', '开发', '程序员', '前端', '后端', '算法', 'github', 'gitlab', 'stackoverflow', 'npm', 'python', 'javascript', 'java', 'rust', 'golang'],
-    工具: ['工具', '效率', '转换', '下载', '编辑器', '插件', '扩展', '在线工具', 'tool', 'converter', 'editor'],
-    学习: ['学习', '教程', '课程', '文档', '知识', '考试', '课堂', '大学', '教育', 'course', 'tutorial', 'docs'],
-    资讯: ['新闻', '资讯', '报道', '头条', '快讯', '日报', '周报', 'news', 'article'],
-    其他: []
+  const DEFAULTS = {
+    zh_CN: {
+      categories: ['视频', '编程', '工具', '学习', '资讯', '其他'],
+      rules: {
+        视频: ['视频', '直播', '电影', '影视', '弹幕', 'bilibili', 'youtube', 'youku', 'iqiyi', 'douyin', 'video', 'movie', 'stream'],
+        编程: ['编程', '代码', '开发', '程序员', '前端', '后端', '算法', 'github', 'gitlab', 'stackoverflow', 'npm', 'python', 'javascript', 'java', 'rust', 'golang', 'coding', 'developer'],
+        工具: ['工具', '效率', '转换', '下载', '编辑器', '插件', '扩展', '在线工具', 'tool', 'converter', 'editor', 'utility', 'download'],
+        学习: ['学习', '教程', '课程', '文档', '知识', '考试', '课堂', '大学', '教育', 'course', 'tutorial', 'docs', 'learn', 'education'],
+        资讯: ['新闻', '资讯', '报道', '头条', '快讯', '日报', '周报', 'news', 'article', 'report'],
+        其他: []
+      }
+    },
+    en: {
+      categories: ['Video', 'Programming', 'Tools', 'Learning', 'News', 'Other'],
+      rules: {
+        Video: ['video', 'movie', 'stream', 'live', 'bilibili', 'youtube', 'youku', 'iqiyi', 'douyin', '视频', '直播', '电影'],
+        Programming: ['programming', 'coding', 'code', 'developer', 'frontend', 'backend', 'algorithm', 'github', 'gitlab', 'stackoverflow', 'npm', 'python', 'javascript', 'java', 'rust', 'golang', '编程', '代码', '开发'],
+        Tools: ['tool', 'utility', 'converter', 'download', 'editor', 'extension', 'plugin', 'productivity', '工具', '效率', '插件'],
+        Learning: ['learning', 'learn', 'tutorial', 'course', 'docs', 'documentation', 'education', 'university', '学习', '教程', '课程', '文档'],
+        News: ['news', 'article', 'report', 'headline', 'daily', 'weekly', '新闻', '资讯', '报道'],
+        Other: []
+      }
+    }
   };
+
+  const DEFAULT_CATEGORIES = DEFAULTS.zh_CN.categories;
+  const DEFAULT_RULES = DEFAULTS.zh_CN.rules;
+
+  function getDefaults(language) {
+    const source = String(language || '').toLowerCase().startsWith('zh')
+      ? DEFAULTS.zh_CN
+      : DEFAULTS.en;
+    return {
+      categories: [...source.categories],
+      keywordRules: Object.fromEntries(
+        Object.entries(source.rules).map(([category, keywords]) => [category, [...keywords]])
+      )
+    };
+  }
 
   function normalize(value) {
     return String(value || '')
@@ -18,12 +47,13 @@
       .trim();
   }
 
-  function mergeRules(categories, customRules) {
+  function mergeRules(categories, customRules, language = 'zh_CN') {
+    const defaults = getDefaults(language).keywordRules;
     return categories.reduce((result, category) => {
       const custom = customRules && Array.isArray(customRules[category])
         ? customRules[category]
         : null;
-      result[category] = (custom || DEFAULT_RULES[category] || [])
+      result[category] = (custom || defaults[category] || [])
         .map(normalize)
         .filter(Boolean);
       return result;
@@ -56,7 +86,10 @@
     const categories = Array.isArray(settings.categories) && settings.categories.length
       ? settings.categories
       : DEFAULT_CATEGORIES;
-    const rules = mergeRules(categories, settings.keywordRules);
+    const language = String(settings.language || 'zh_CN').toLowerCase().startsWith('zh')
+      ? 'zh_CN'
+      : 'en';
+    const rules = mergeRules(categories, settings.keywordRules, language);
     const index = buildKeywordIndex(rules);
     const scores = Object.fromEntries(categories.map((category) => [category, 0]));
     const matches = Object.fromEntries(categories.map((category) => [category, new Set()]));
@@ -77,7 +110,10 @@
       });
     });
 
-    const fallback = categories.includes('其他') ? '其他' : categories[categories.length - 1];
+    const preferredFallback = language === 'zh_CN' ? '其他' : 'Other';
+    const fallback = categories.includes(preferredFallback)
+      ? preferredFallback
+      : categories[categories.length - 1];
     const ranked = categories
       .filter((category) => category !== fallback)
       .sort((a, b) => scores[b] - scores[a]);
@@ -91,19 +127,23 @@
       score,
       source: 'local',
       summary: tags.length
-        ? `匹配到 ${tags.map((tag) => `“${tag}”`).join('、')}`
-        : '暂未找到明确关键词，可手动调整分类'
+        ? language === 'zh_CN'
+          ? `匹配到 ${tags.map((tag) => `“${tag}”`).join('、')}`
+          : `Matched ${tags.map((tag) => `“${tag}”`).join(', ')}`
+        : language === 'zh_CN'
+          ? '暂未找到明确关键词，可手动调整分类'
+          : 'No clear keyword match. You can adjust the category.'
     };
   }
 
-  function rulesToText(categories, rules) {
-    const merged = mergeRules(categories, rules);
+  function rulesToText(categories, rules, language = 'zh_CN') {
+    const merged = mergeRules(categories, rules, language);
     return categories
       .map((category) => `${category}=${merged[category].join(', ')}`)
       .join('\n');
   }
 
-  function textToRules(text, categories) {
+  function textToRules(text, categories, language = 'zh_CN') {
     const result = {};
     String(text || '').split(/\r?\n/).forEach((line) => {
       const separator = line.indexOf('=');
@@ -115,12 +155,14 @@
         .map((keyword) => keyword.trim())
         .filter(Boolean);
     });
-    return mergeRules(categories, result);
+    return mergeRules(categories, result, language);
   }
 
   const api = {
+    DEFAULTS,
     DEFAULT_CATEGORIES,
     DEFAULT_RULES,
+    getDefaults,
     buildKeywordIndex,
     classify,
     mergeRules,

@@ -1,17 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "SmartFav - 智能收藏夹",
-  "version": "1.1.2",
-  "description": "本地关键词优先、AI 可选增强的智能网页收藏夹",
+  "name": "__MSG_extensionName__",
+  "version": "1.6.4",
+  "description": "__MSG_extensionDescription__",
+  "default_locale": "zh_CN",
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "bookmarks"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://localhost:11434/*",
+    "https://openrouter.ai/*",
+    "https://api.minimaxi.com/*",
+    "https://api.deepseek.com/*",
+    "https://api.openai.com/*"
   ],
   "action": {
+    "default_title": "__MSG_actionTitle__",
     "default_popup": "popup.html"
   },
   "background": {

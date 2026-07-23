@@ -41,9 +41,12 @@
     const provider = getProvider(providerId);
     const apiKey = String(settings.apiKey || '').trim();
     const model = String(settings.model || provider.model).trim();
+    const isChinese = String(settings.language || 'zh_CN').toLowerCase().startsWith('zh');
 
     if (provider.requiresKey && !apiKey) {
-      throw new Error('请先在设置中填写 API Key');
+      throw new Error(isChinese
+        ? '请先在设置中填写 API Key'
+        : 'Enter an API Key in settings first');
     }
 
     if (providerId === 'ollama') {
@@ -57,7 +60,11 @@
           format: 'json'
         })
       });
-      if (!response.ok) throw new Error(`Ollama 连接失败（${response.status}）`);
+      if (!response.ok) {
+        throw new Error(isChinese
+          ? `Ollama 连接失败（${response.status}）`
+          : `Ollama connection failed (${response.status})`);
+      }
       const data = await response.json();
       return data.message && data.message.content ? data.message.content : '';
     }
@@ -78,7 +85,11 @@
       })
     });
 
-    if (!response.ok) throw new Error(`API 请求失败（${response.status}）`);
+    if (!response.ok) {
+      throw new Error(isChinese
+        ? `API 请求失败（${response.status}）`
+        : `API request failed (${response.status})`);
+    }
     const data = await response.json();
     return data.choices && data.choices[0] && data.choices[0].message
       ? data.choices[0].message.content || ''
