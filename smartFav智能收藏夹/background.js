@@ -5,10 +5,19 @@ chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     // 初始化默认设置
     const defaultSettings = {
-      apiProvider: 'minimax',
+      aiEnabled: false,
+      apiProvider: 'ollama',
       apiKey: '',
-      model: 'MiniMax-M2.5',
-      categories: ['视频', '编程', '工具', '学习', '资讯', '其他']
+      model: 'qwen2.5:3b',
+      categories: ['视频', '编程', '工具', '学习', '资讯', '其他'],
+      keywordRules: {
+        视频: ['视频', '直播', '电影', '影视', '弹幕', 'bilibili', 'youtube'],
+        编程: ['编程', '代码', '开发', 'github', 'gitlab', 'javascript', 'python'],
+        工具: ['工具', '效率', '转换', '下载', '插件', '扩展'],
+        学习: ['学习', '教程', '课程', '文档', '知识', '教育'],
+        资讯: ['新闻', '资讯', '报道', '头条', '快讯'],
+        其他: []
+      }
     };
     
     chrome.storage.local.set({
@@ -30,10 +39,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === 'saveFavorite') {
-    const { favorites = [] } = chrome.storage.local.get(['favorites']);
-    favorites.unshift(message.favorite);
-    chrome.storage.local.set({ favorites });
-    sendResponse({ success: true });
+    chrome.storage.local.get(['favorites'], (result) => {
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      const nextFavorites = [message.favorite, ...favorites.filter((item) => item.url !== message.favorite.url)];
+      chrome.storage.local.set({ favorites: nextFavorites }, () => sendResponse({ success: true }));
+    });
     return true;
   }
 });
