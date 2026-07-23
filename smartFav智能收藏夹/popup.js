@@ -113,6 +113,7 @@ let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
 let showingAllFavorites = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await recoverManagedBrowserFavorites();
   currentSettings = await loadSettings();
   applyLanguage();
   await Promise.all([renderFolders(), renderRecentFavorites()]);
@@ -141,6 +142,18 @@ function storageSet(values) {
     return Promise.resolve();
   }
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+function recoverManagedBrowserFavorites() {
+  if (!isExtension || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'recoverManagedFavorites' }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      resolve(runtimeError ? null : response);
+    });
+  });
 }
 
 async function loadSettings() {

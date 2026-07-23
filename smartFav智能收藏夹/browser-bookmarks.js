@@ -25,6 +25,13 @@
     return (matches || []).find((item) => !item.url && item.title === ROOT_FOLDER_TITLE) || null;
   }
 
+  async function findRoots(api) {
+    const matches = await callApi(api, 'search', { title: ROOT_FOLDER_TITLE });
+    return (matches || []).filter(
+      (item) => !item.url && item.title === ROOT_FOLDER_TITLE
+    );
+  }
+
   async function findOrCreateRoot(api) {
     const existing = await findRoot(api);
     if (existing) return existing;
@@ -98,12 +105,12 @@
   // 收集浏览器收藏夹中所有不在 SmartFav 文件夹内的书签
   async function collectExternalBookmarks(api) {
     const tree = await callApi(api, 'getTree');
-    const root = await findRoot(api);
-    const rootId = root ? root.id : null;
+    const roots = await findRoots(api);
+    const rootIds = new Set(roots.map((root) => root.id));
     const result = [];
     (function walk(nodes, insideRoot) {
       (nodes || []).forEach((node) => {
-        const inRoot = insideRoot || (rootId !== null && node.id === rootId);
+        const inRoot = insideRoot || rootIds.has(node.id);
         if (node.url && !inRoot) result.push(node);
         if (node.children) walk(node.children, inRoot);
       });
@@ -111,14 +118,42 @@
     return result;
   }
 
+  // 恢复旧版本已经整理进 SmartFav/分类 的书签。
+  // 分类文件夹名称是用户之前的明确选择，因此恢复时保持原分类，不重新猜测。
+  async function collectManagedBookmarks(api, fallbackCategory = 'Other') {
+    const roots = await findRoots(api);
+    const result = [];
+    for (const root of roots) {
+      const subtree = await callApi(api, 'getSubTree', root.id);
+      const rootNode = subtree && subtree[0];
+      if (!rootNode) continue;
+
+      (function walk(nodes, category) {
+        (nodes || []).forEach((node) => {
+          if (node.url) {
+            result.push({
+              ...node,
+              category: category || fallbackCategory
+            });
+            return;
+          }
+          const nextCategory = category || node.title || fallbackCategory;
+          if (node.children) walk(node.children, nextCategory);
+        });
+      })(rootNode.children, '');
+    }
+    return result;
+  }
+
   // 判断某个书签节点是否位于 SmartFav 文件夹内（用于忽略插件自己写入的记录）
   async function isInsideSmartFavFolder(api, node) {
-    const root = await findRoot(api);
-    if (!root || !node) return false;
+    const roots = await findRoots(api);
+    const rootIds = new Set(roots.map((root) => root.id));
+    if (!rootIds.size || !node) return false;
     let parentId = node.parentId;
     const visited = new Set();
     while (parentId && !visited.has(parentId)) {
-      if (parentId === root.id) return true;
+      if (rootIds.has(parentId)) return true;
       visited.add(parentId);
       let parents;
       try {
@@ -187,6 +222,7 @@
     findUrlMatches,
     writeFavorite,
     collectExternalBookmarks,
+    collectManagedBookmarks,
     isInsideSmartFavFolder,
     placeBookmarkInCategory,
     organizeBookmarks

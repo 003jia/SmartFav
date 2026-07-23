@@ -73,6 +73,96 @@ function setStoredFavorites(favorites) {
   });
 }
 
+function setStoredState(values) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(values, resolve);
+  });
+}
+
+// 扩展被移除后重新加载、或换目录加载时，chrome.storage 可能是空的，
+// 但旧版本整理到浏览器 SmartFav/分类 下的网址仍然存在。
+// 启动弹窗时从这些受管目录恢复缺失记录，并保留原文件夹分类。
+async function recoverManagedFavorites() {
+  const { settings, favorites } = await getStoredState();
+  if (!chrome.bookmarks) {
+    return { status: 'unavailable', recovered: 0, total: 0, favorites };
+  }
+
+  const language = settings.language
+    || (chrome.i18n.getUILanguage().toLowerCase().startsWith('zh') ? 'zh_CN' : 'en');
+  const defaults = SmartFavClassifier.getDefaults(language);
+  const baseCategories = Array.isArray(settings.categories) && settings.categories.length
+    ? [...settings.categories]
+    : [...defaults.categories];
+  const fallbackCategory = baseCategories[baseCategories.length - 1]
+    || (language === 'zh_CN' ? '其他' : 'Other');
+  const managed = await SmartFavBookmarks.collectManagedBookmarks(
+    chrome.bookmarks,
+    fallbackCategory
+  );
+
+  const existingUrls = new Set(favorites.map((item) => item.url));
+  const seenUrls = new Set();
+  const additions = [];
+  const recoveredCategories = [];
+  managed.forEach((node) => {
+    const url = String(node.url || '').trim();
+    if (!url || seenUrls.has(url)) return;
+    seenUrls.add(url);
+    const category = String(node.category || fallbackCategory).trim() || fallbackCategory;
+    if (!baseCategories.includes(category) && !recoveredCategories.includes(category)) {
+      recoveredCategories.push(category);
+    }
+    if (existingUrls.has(url)) return;
+    additions.push({
+      url,
+      title: node.title || url,
+      favicon: '',
+      description: '',
+      category,
+      tags: [],
+      summary: language === 'zh_CN'
+        ? '从浏览器 SmartFav 文件夹恢复'
+        : 'Recovered from the browser SmartFav folder',
+      classificationSource: 'local',
+      createdAt: node.dateAdded || Date.now()
+    });
+  });
+
+  const nextCategories = [...baseCategories, ...recoveredCategories];
+  const settingsChanged = recoveredCategories.length > 0
+    || !Array.isArray(settings.categories)
+    || !settings.categories.length;
+  const nextSettings = settingsChanged
+    ? {
+        ...settings,
+        language,
+        categories: nextCategories,
+        keywordRules: SmartFavClassifier.mergeRules(
+          nextCategories,
+          settings.keywordRules,
+          language
+        )
+      }
+    : settings;
+  const nextFavorites = additions.length ? [...additions, ...favorites] : favorites;
+
+  if (additions.length || settingsChanged) {
+    await setStoredState({
+      favorites: nextFavorites,
+      settings: nextSettings
+    });
+  }
+
+  return {
+    status: 'ok',
+    recovered: additions.length,
+    total: managed.length,
+    categoriesAdded: recoveredCategories.length,
+    favorites: nextFavorites
+  };
+}
+
 // 整理浏览器收藏夹：读取全部书签 → 本地分类 → 导入 SmartFav 分类；
 // 仅当"允许整理浏览器收藏夹"开启时才把书签移动进 SmartFav/分类 文件夹
 async function organizeBrowserBookmarks() {
@@ -191,10 +281,21 @@ chrome.bookmarks.onCreated.addListener((id, node) => {
 
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'recoverManagedFavorites') {
+    recoverManagedFavorites()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
   if (message.type === 'getFavorites') {
-    chrome.storage.local.get(['favorites'], (result) => {
-      sendResponse(result.favorites || []);
-    });
+    recoverManagedFavorites()
+      .then((result) => sendResponse(result.favorites || []))
+      .catch(() => {
+        chrome.storage.local.get(['favorites'], (result) => {
+          sendResponse(result.favorites || []);
+        });
+      });
     return true;
   }
   

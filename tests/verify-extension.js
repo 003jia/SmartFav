@@ -23,7 +23,7 @@ const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.6.4');
+  assert.equal(manifest.version, '1.6.5');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -61,6 +61,9 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /class="bookmark-actions"/);
   assert.match(backgroundJs, /chrome\.bookmarks\.onCreated\.addListener/);
   assert.match(backgroundJs, /organizeBookmarks/);
+  assert.match(backgroundJs, /recoverManagedFavorites/);
+  assert.match(backgroundJs, /collectManagedBookmarks/);
+  assert.match(popupJs, /type:\s*'recoverManagedFavorites'/);
   assert.match(backgroundJs, /bookmarkOrganizeEnabled/);
   assert.match(backgroundJs, /bookmarkAutoCaptureEnabled/);
   assert.doesNotMatch(
@@ -354,6 +357,18 @@ async function verifyOrganizeBookmarks() {
   );
   assert.equal(secondPass.favorites.length, 0);
 
+  // 旧版已经整理到 SmartFav/分类 下的记录仍可被恢复，并保留原分类。
+  const managed = await browserBookmarks.collectManagedBookmarks(api, 'Other');
+  assert.equal(managed.length, 2);
+  assert.equal(
+    managed.find((node) => node.url === 'https://course.example.com').category,
+    'Learning'
+  );
+  assert.equal(
+    managed.find((node) => node.url === 'https://news.example.com').category,
+    'News'
+  );
+
   // isInsideSmartFavFolder：星标自动捕获时用于忽略插件自己写入的记录
   assert.equal(await browserBookmarks.isInsideSmartFavFolder(api, tutorialNode), true);
   const outsideNode = { id: 'x', parentId: 'other', url: 'https://outside.example.com' };
@@ -460,6 +475,61 @@ async function verifyBackgroundBookmarkFlows() {
     bookmarkOrganizeEnabled: false,
     bookmarkAutoCaptureEnabled: false
   };
+
+  // 重新加载扩展且本地 storage 为空时，应从旧 SmartFav/分类 目录恢复，
+  // 保留旧分类并把自定义分类补回设置，不能移动或重复导入浏览器收藏。
+  const recoveryHarness = createBackgroundHarness(baseSettings);
+  const legacyRoot = await createBookmark(recoveryHarness.bookmarks, {
+    title: 'SmartFav'
+  });
+  const legacyLearning = await createBookmark(recoveryHarness.bookmarks, {
+    parentId: legacyRoot.id,
+    title: 'Learning'
+  });
+  const legacyCustom = await createBookmark(recoveryHarness.bookmarks, {
+    parentId: legacyRoot.id,
+    title: 'Research'
+  });
+  const legacyCourse = await createBookmark(recoveryHarness.bookmarks, {
+    parentId: legacyLearning.id,
+    title: 'Existing course',
+    url: 'https://legacy.example.com/course'
+  });
+  const legacyPaper = await createBookmark(recoveryHarness.bookmarks, {
+    parentId: legacyCustom.id,
+    title: 'Existing paper',
+    url: 'https://legacy.example.com/paper'
+  });
+  const recoveryResult = await sendBackgroundMessage(
+    recoveryHarness,
+    { type: 'recoverManagedFavorites' }
+  );
+  assert.equal(recoveryResult.status, 'ok');
+  assert.equal(recoveryResult.total, 2);
+  assert.equal(recoveryResult.recovered, 2);
+  assert.equal(recoveryResult.categoriesAdded, 1);
+  assert.equal(recoveryHarness.state.favorites.length, 2);
+  assert.equal(
+    recoveryHarness.state.favorites.find(
+      (favorite) => favorite.url === legacyCourse.url
+    ).category,
+    'Learning'
+  );
+  assert.equal(
+    recoveryHarness.state.favorites.find(
+      (favorite) => favorite.url === legacyPaper.url
+    ).category,
+    'Research'
+  );
+  assert.ok(recoveryHarness.state.settings.categories.includes('Research'));
+  assert.equal(recoveryHarness.bookmarks.nodes.get(legacyCourse.id).parentId, legacyLearning.id);
+  assert.equal(recoveryHarness.bookmarks.nodes.get(legacyPaper.id).parentId, legacyCustom.id);
+  const repeatedRecovery = await sendBackgroundMessage(
+    recoveryHarness,
+    { type: 'recoverManagedFavorites' }
+  );
+  assert.equal(repeatedRecovery.recovered, 0);
+  assert.equal(recoveryHarness.state.favorites.length, 2);
 
   // 即使关闭普通写入，"立即整理"仍会读取浏览器收藏并仅导入 SmartFav。
   const localHarness = createBackgroundHarness(baseSettings, [{
