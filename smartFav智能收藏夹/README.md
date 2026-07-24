@@ -115,7 +115,11 @@ SmartFav
 1. 使用项目生成的 `dist/SmartFav-Edge-1.8.0.zip`，或自行将 `smartFav智能收藏夹` 文件夹内的文件压缩，确保 `manifest.json` 位于 ZIP 根目录。
 2. 在 Microsoft Partner Center 的扩展提交页面上传 ZIP。
 3. 上传成功后，在 Store listings 中确认出现“中文（简体）”和“English”。
-4. 分别填写两种语言的商店长描述、截图和推广素材。
+4. 分别填写两种语言的商店长描述，并上传仓库 `docs/store-assets` 中对应语言的 `1280 × 800` 截图。
+5. 隐私政策填写 `https://github.com/003jia/SmartFav/blob/main/PRIVACY.md`。
+6. 发布方联系邮箱必须在 Partner Center 的开发人员设置中单独保存并完成验证；这项账号信息不包含在扩展包中。
+
+完整的权限用途、单一用途说明、隐私披露和邮箱验证步骤见仓库的 [`docs/edge-store-submission.md`](../docs/edge-store-submission.md)。
 
 版本 1.5.0 移除 `action.default_popup`，改为工具栏点击时通过 `activeTab + scripting` 注入隔离的悬浮窗。现有 `popup.html` 作为扩展源 iframe 复用，保留原有收藏、设置、中英文、主题与浏览器收藏夹能力，同时让圆角外部真正显示当前网页。
 

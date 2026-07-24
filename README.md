@@ -6,6 +6,17 @@
 
 ![SmartFav 原生浏览器插件弹窗](docs/smartfav-popup.png)
 
+## Microsoft Edge 商店发布
+
+- [隐私政策（中英双语）](PRIVACY.md)
+- [Edge Add-ons 提交清单与可直接粘贴的权限说明](docs/edge-store-submission.md)
+- [中文商店截图（1280 × 800）](docs/store-assets/smartfav-edge-store-zh-1280x800.png)
+- [English store screenshot (1280 × 800)](docs/store-assets/smartfav-edge-store-en-1280x800.png)
+
+公开的隐私政策地址：
+
+<https://github.com/003jia/SmartFav/blob/main/PRIVACY.md>
+
 ## 特点
 
 - **无需 AI 也能使用**：本地关键词权重或关键词向量匹配完成基础分类，默认不上传网页内容。
