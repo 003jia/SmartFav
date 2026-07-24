@@ -5,7 +5,14 @@ const DEFAULT_SETTINGS = {
   language: detectedLanguage,
   themeStyle: 'glass',
   colorMode: 'light',
+  popupWidth: 360,
+  popupHeight: 560,
+  customBackgroundImage: '',
   aiEnabled: false,
+  aiAutoClassify: true,
+  aiCreateCategories: false,
+  classificationMode: 'weighted',
+  classificationWeights: SmartFavClassifier.DEFAULT_WEIGHTS,
   apiProvider: 'ollama',
   apiKey: '',
   model: 'qwen2.5:3b',
@@ -18,9 +25,11 @@ const DEFAULT_SETTINGS = {
 };
 
 const THEME_STYLES = ['glass', 'white', 'gray', 'black', 'parchment'];
+const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.storage && chrome.tabs);
 const previewState = {
   settings: DEFAULT_SETTINGS,
+  recentlyDeleted: [],
   favorites: [
     {
       title: 'GitHub · Build and ship software',
@@ -61,7 +70,16 @@ const elements = {
   mainView: document.getElementById('mainView'),
   favoritesView: document.getElementById('favoritesView'),
   categoriesView: document.getElementById('categoriesView'),
+  trashView: document.getElementById('trashView'),
   settingsView: document.getElementById('settingsView'),
+  favoritesBackBtn: document.getElementById('favoritesBackBtn'),
+  categoriesBackBtn: document.getElementById('categoriesBackBtn'),
+  trashBackBtn: document.getElementById('trashBackBtn'),
+  trashNavBtn: document.getElementById('trashNavBtn'),
+  trashEntryCount: document.getElementById('trashEntryCount'),
+  trashViewSummary: document.getElementById('trashViewSummary'),
+  trashStatus: document.getElementById('trashStatus'),
+  trashList: document.getElementById('trashList'),
   loadingStatus: document.getElementById('loadingStatus'),
   successStatus: document.getElementById('successStatus'),
   successMsg: document.getElementById('successMsg'),
@@ -89,6 +107,13 @@ const elements = {
   categoryFoldersNavBtn: document.getElementById('categoryFoldersNavBtn'),
   compactThemeStyle: document.getElementById('compactThemeStyle'),
   compactDarkMode: document.getElementById('compactDarkMode'),
+  compactPopupWidth: document.getElementById('compactPopupWidth'),
+  compactPopupWidthValue: document.getElementById('compactPopupWidthValue'),
+  compactPopupHeight: document.getElementById('compactPopupHeight'),
+  compactPopupHeightValue: document.getElementById('compactPopupHeightValue'),
+  compactBackgroundImage: document.getElementById('compactBackgroundImage'),
+  backgroundImagePreview: document.getElementById('backgroundImagePreview'),
+  clearBackgroundImageBtn: document.getElementById('clearBackgroundImageBtn'),
   recentSection: document.getElementById('recentSection'),
   recentList: document.getElementById('recentList'),
   viewAllBtn: document.getElementById('viewAllBtn'),
@@ -98,6 +123,11 @@ const elements = {
   compactModel: document.getElementById('compactModel'),
   compactApiKey: document.getElementById('compactApiKey'),
   compactApiKeyField: document.getElementById('compactApiKeyField'),
+  compactClassificationMode: document.getElementById('compactClassificationMode'),
+  compactKeywordWeight: document.getElementById('compactKeywordWeight'),
+  compactKeywordWeightValue: document.getElementById('compactKeywordWeightValue'),
+  compactAiAutoClassify: document.getElementById('compactAiAutoClassify'),
+  compactAiCreateCategories: document.getElementById('compactAiCreateCategories'),
   compactBrowserBookmarksEnabled: document.getElementById('compactBrowserBookmarksEnabled'),
   compactBookmarkFields: document.getElementById('compactBookmarkFields'),
   compactBookmarkWriteMode: document.getElementById('compactBookmarkWriteMode'),
@@ -119,17 +149,20 @@ let currentSuggestion = null;
 let currentSettings = DEFAULT_SETTINGS;
 let categoryDraft = [];
 let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
+let pendingBackgroundImage = DEFAULT_SETTINGS.customBackgroundImage;
 let showingAllFavorites = false;
 let activeView = 'home';
+let aiEnhanceInFlight = false;
 
 document.addEventListener('DOMContentLoaded', async () => {
   await recoverManagedBrowserFavorites();
+  await cleanupRecentlyDeletedItems();
   currentSettings = await loadSettings();
   applyLanguage();
-  await Promise.all([renderFolders(), renderRecentFavorites()]);
+  await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
   await analyzeCurrentTab();
   const requestedView = new URLSearchParams(window.location.search).get('view');
-  await showView(['favorites', 'categories', 'settings'].includes(requestedView)
+  await showView(['favorites', 'categories', 'trash', 'settings'].includes(requestedView)
     ? requestedView
     : 'home');
 });
@@ -153,6 +186,20 @@ function storageSet(values) {
     return Promise.resolve();
   }
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+function sendRuntimeMessage(type, payload = {}) {
+  if (!isExtension || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') {
+    return Promise.resolve({ status: 'unavailable' });
+  }
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type, ...payload }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      resolve(runtimeError
+        ? { status: 'error', message: runtimeError.message }
+        : response);
+    });
+  });
 }
 
 function recoverManagedBrowserFavorites() {
@@ -181,7 +228,16 @@ async function loadSettings() {
     language,
     themeStyle: normalizeThemeStyle(saved.themeStyle),
     colorMode: saved.themeStyle === 'black' || saved.colorMode === 'dark' ? 'dark' : 'light',
+    popupWidth: normalizePopupDimension(saved.popupWidth, 320, 520, DEFAULT_SETTINGS.popupWidth),
+    popupHeight: normalizePopupDimension(saved.popupHeight, 420, 600, DEFAULT_SETTINGS.popupHeight),
+    customBackgroundImage: typeof saved.customBackgroundImage === 'string'
+      ? saved.customBackgroundImage
+      : '',
     aiEnabled: typeof saved.aiEnabled === 'boolean' ? saved.aiEnabled : Boolean(saved.apiKey),
+    aiAutoClassify: saved.aiAutoClassify !== false,
+    aiCreateCategories: Boolean(saved.aiCreateCategories),
+    classificationMode: saved.classificationMode === 'vector' ? 'vector' : 'weighted',
+    classificationWeights: SmartFavClassifier.normalizeWeights(saved.classificationWeights),
     browserBookmarksEnabled: Boolean(saved.browserBookmarksEnabled),
     bookmarkWriteMode: saved.bookmarkWriteMode === 'add' ? 'add' : 'overwrite',
     bookmarkOrganizeEnabled: Boolean(saved.bookmarkOrganizeEnabled),
@@ -193,6 +249,13 @@ async function loadSettings() {
     || !saved.language
     || !THEME_STYLES.includes(saved.themeStyle)
     || !['light', 'dark'].includes(saved.colorMode)
+    || !Number.isFinite(Number(saved.popupWidth))
+    || !Number.isFinite(Number(saved.popupHeight))
+    || typeof saved.customBackgroundImage !== 'string'
+    || typeof saved.aiAutoClassify !== 'boolean'
+    || typeof saved.aiCreateCategories !== 'boolean'
+    || !['weighted', 'vector'].includes(saved.classificationMode)
+    || !saved.classificationWeights
     || typeof saved.browserBookmarksEnabled !== 'boolean'
     || typeof saved.bookmarkOrganizeEnabled !== 'boolean'
     || typeof saved.bookmarkAutoCaptureEnabled !== 'boolean'
@@ -205,11 +268,39 @@ function normalizeThemeStyle(value) {
   return THEME_STYLES.includes(value) ? value : 'glass';
 }
 
+function normalizePopupDimension(value, minimum, maximum, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.round(Math.min(maximum, Math.max(minimum, parsed)) / 20) * 20;
+}
+
 function applyAppearance(settings = currentSettings) {
   const themeStyle = normalizeThemeStyle(settings.themeStyle);
   const colorMode = themeStyle === 'black' || settings.colorMode === 'dark' ? 'dark' : 'light';
+  const popupWidth = normalizePopupDimension(
+    settings.popupWidth,
+    320,
+    520,
+    DEFAULT_SETTINGS.popupWidth
+  );
+  const popupHeight = normalizePopupDimension(
+    settings.popupHeight,
+    420,
+    600,
+    DEFAULT_SETTINGS.popupHeight
+  );
+  const customBackgroundImage = typeof settings.customBackgroundImage === 'string'
+    ? settings.customBackgroundImage
+    : '';
   document.documentElement.dataset.theme = themeStyle;
   document.documentElement.dataset.mode = colorMode;
+  document.documentElement.dataset.customBackground = customBackgroundImage ? 'true' : 'false';
+  document.documentElement.style.setProperty('--popup-width', `${popupWidth}px`);
+  document.documentElement.style.setProperty('--popup-height', `${popupHeight}px`);
+  document.documentElement.style.setProperty(
+    '--custom-background-image',
+    customBackgroundImage ? `url(${JSON.stringify(customBackgroundImage)})` : 'none'
+  );
   elements.modeBtn.textContent = t(colorMode === 'dark' ? 'lightModeShort' : 'darkModeShort');
   elements.modeBtn.disabled = themeStyle === 'black';
   elements.modeBtn.setAttribute(
@@ -230,6 +321,7 @@ function applyLanguage() {
     home: 'saveCurrentPage',
     favorites: 'myFavorites',
     categories: 'categoryFolders',
+    trash: 'recentlyDeleted',
     settings: 'extensionSettings'
   };
   elements.settingsBtn.textContent = t(isHome ? 'settings' : 'back');
@@ -273,10 +365,13 @@ async function switchLanguage() {
     console.warn('SmartFav could not reclassify favorites after switching language:', error);
   }
   applyLanguage();
-  await Promise.all([renderFolders(), renderRecentFavorites()]);
+  await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
   if (currentTabInfo) {
     currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
     showCategorySuggestion(currentSuggestion);
+    if (currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
+      await enhanceCurrentSuggestion({ automatic: true });
+    }
   }
   if (activeView === 'settings') populateCompactSettings();
   if (activeView === 'categories') populateCategoryManager();
@@ -304,19 +399,24 @@ async function analyzeCurrentTab() {
         url: tab.url,
         title: tab.title || getHostname(tab.url),
         favicon: tab.favIconUrl || '',
-        description: pageContent.description || ''
+        description: pageContent.description || '',
+        keywords: pageContent.keywords || []
       };
     } else {
       currentTabInfo = {
         url: 'https://github.com/openai/codex',
         title: 'openai/codex · GitHub',
         favicon: '',
-        description: 'An open-source coding agent for software development.'
+        description: 'An open-source coding agent for software development.',
+        keywords: ['coding agent', 'developer tools', 'AI']
       };
     }
 
     currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
     showCategorySuggestion(currentSuggestion);
+    if (currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
+      await enhanceCurrentSuggestion({ automatic: true });
+    }
   } catch (error) {
     console.error('Failed to read page:', error);
     showError(t('readPageFailed'));
@@ -334,8 +434,17 @@ function getPageContent(tabId) {
       func: () => {
         const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
         const ogDescription = document.querySelector('meta[property="og:description"]')?.content || '';
+        const metaKeywords = document.querySelector('meta[name="keywords"]')?.content || '';
         const bodyText = document.body?.innerText?.slice(0, 1200) || '';
-        return { description: metaDescription || ogDescription || bodyText.slice(0, 320) };
+        const keywords = metaKeywords
+          .split(/[,，]/)
+          .map((keyword) => keyword.trim())
+          .filter(Boolean)
+          .slice(0, 24);
+        return {
+          description: metaDescription || ogDescription || bodyText.slice(0, 320),
+          keywords
+        };
       }
     }, (results) => {
       if (chrome.runtime.lastError) {
@@ -381,35 +490,76 @@ elements.categorySelect.addEventListener('change', () => {
   updateConfirmLabel();
 });
 
-elements.enhanceBtn.addEventListener('click', async () => {
-  if (!currentTabInfo || !currentSettings.aiEnabled) return;
+elements.enhanceBtn.addEventListener('click', () => {
+  enhanceCurrentSuggestion({ automatic: false });
+});
+
+async function enhanceCurrentSuggestion({ automatic = false } = {}) {
+  if (!currentTabInfo || !currentSettings.aiEnabled || aiEnhanceInFlight) return;
+  aiEnhanceInFlight = true;
   elements.enhanceBtn.disabled = true;
-  elements.enhanceBtn.textContent = t('optimizing');
+  elements.enhanceBtn.textContent = t(automatic ? 'aiAutoOptimizing' : 'optimizing');
   elements.aiMessage.classList.add('hidden');
   try {
     const response = await SmartFavAI.call(buildClassificationPrompt(currentTabInfo), currentSettings);
-    const suggestion = parseAIResponse(response);
+    const suggestion = await applyAIResponse(response);
     currentSuggestion = suggestion;
     showCategorySuggestion(suggestion);
+    if (suggestion.createdCategory) {
+      elements.aiMessage.textContent = t('aiCategoryCreated', {
+        category: suggestion.createdCategory
+      });
+      elements.aiMessage.classList.remove('hidden');
+      await renderFolders();
+    }
   } catch (error) {
     elements.aiMessage.textContent = t('aiFallbackKept', { message: error.message });
     elements.aiMessage.classList.remove('hidden');
   } finally {
+    aiEnhanceInFlight = false;
     elements.enhanceBtn.disabled = false;
     elements.enhanceBtn.textContent = t('aiOptimize');
   }
-});
+}
 
 function buildClassificationPrompt(tabInfo) {
+  const localEvidence = SmartFavClassifier.classify(tabInfo, currentSettings);
+  const separator = currentSettings.language === 'zh_CN' ? '、' : ', ';
+  const rules = currentSettings.categories
+    .map((category) => {
+      const keywords = currentSettings.keywordRules[category] || [];
+      return `${category}=${keywords.join(', ')}`;
+    })
+    .join('\n');
+  const evidence = Object.entries(localEvidence.scoreRatios || {})
+    .sort((left, right) => right[1] - left[1])
+    .map(([category, ratio]) => `${category}:${ratio}%`)
+    .join(separator);
+  const weights = localEvidence.weights || SmartFavClassifier.DEFAULT_WEIGHTS;
   return t('classifyPrompt', {
     title: tabInfo.title,
     url: tabInfo.url,
     description: tabInfo.description,
-    categories: currentSettings.categories.join(currentSettings.language === 'zh_CN' ? '、' : ', ')
+    keywords: Array.isArray(tabInfo.keywords) ? tabInfo.keywords.join(separator) : '',
+    categories: currentSettings.categories.join(separator),
+    rules,
+    strategy: localEvidence.method,
+    evidence,
+    weights: `title=${weights.title}, tags=${weights.keywords}, url=${weights.url}, description=${weights.description}`,
+    allowCreate: currentSettings.aiCreateCategories ? 'true' : 'false'
   });
 }
 
-function parseAIResponse(response) {
+function sanitizeAICategoryName(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 32);
+}
+
+async function applyAIResponse(response) {
   const match = String(response || '').match(/\{[\s\S]*\}/);
   if (!match) throw new Error(t('aiResponseInvalid'));
   const parsed = JSON.parse(match[0]);
@@ -417,11 +567,44 @@ function parseAIResponse(response) {
   const fallback = currentSettings.categories.includes(preferredFallback)
     ? preferredFallback
     : currentSettings.categories[currentSettings.categories.length - 1];
+  const requestedCategory = sanitizeAICategoryName(parsed.newCategory || parsed.category);
+  const existingCategory = currentSettings.categories.find(
+    (category) => normalizeCategoryName(category) === normalizeCategoryName(requestedCategory)
+  );
+  let category = existingCategory || fallback;
+  let createdCategory = '';
+
+  if (
+    !existingCategory
+    && requestedCategory
+    && currentSettings.aiCreateCategories
+    && currentSettings.categories.length < 50
+  ) {
+    const proposedKeywords = [
+      ...(Array.isArray(parsed.newKeywords) ? parsed.newKeywords : []),
+      ...(Array.isArray(parsed.keywords) ? parsed.keywords : []),
+      ...(Array.isArray(parsed.tags) ? parsed.tags : [])
+    ];
+    const keywords = splitKeywords(proposedKeywords.join(',')).slice(0, 16);
+    currentSettings = {
+      ...currentSettings,
+      categories: [...currentSettings.categories, requestedCategory],
+      keywordRules: {
+        ...currentSettings.keywordRules,
+        [requestedCategory]: keywords
+      }
+    };
+    await storageSet({ settings: currentSettings });
+    category = requestedCategory;
+    createdCategory = requestedCategory;
+  }
+
   return {
-    category: currentSettings.categories.includes(parsed.category) ? parsed.category : fallback,
+    category,
     tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 4).map(String) : [],
     summary: String(parsed.summary || t('aiSummaryFallback')),
-    source: 'ai'
+    source: 'ai',
+    createdCategory
   };
 }
 
@@ -519,6 +702,146 @@ async function toggleAllFavorites() {
   await renderRecentFavorites();
 }
 
+async function cleanupRecentlyDeletedItems() {
+  if (isExtension) return sendRuntimeMessage('cleanupRecentlyDeleted');
+  const result = await storageGet(['recentlyDeleted']);
+  const items = Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : [];
+  const now = Date.now();
+  const retained = items.filter((item) => {
+    const deletedAt = Number(item.deletedAt) || now;
+    return (Number(item.expiresAt) || deletedAt + TRASH_RETENTION_MS) > now;
+  });
+  if (retained.length !== items.length) {
+    await storageSet({ recentlyDeleted: retained });
+  }
+  return { status: 'ok', removed: items.length - retained.length, items: retained };
+}
+
+async function getRecentlyDeletedItems() {
+  if (isExtension) {
+    const response = await sendRuntimeMessage('getRecentlyDeleted');
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message ? response.message : t('trashLoadFailed'));
+    }
+    return Array.isArray(response.items) ? response.items : [];
+  }
+  const cleanup = await cleanupRecentlyDeletedItems();
+  return cleanup.items || [];
+}
+
+function renderTrashRow(item) {
+  const title = item.title || item.url || t('untitledPage');
+  const expiresAt = Number(item.expiresAt)
+    || (Number(item.deletedAt) || Date.now()) + TRASH_RETENTION_MS;
+  const days = Math.max(1, Math.ceil((expiresAt - Date.now()) / (24 * 60 * 60 * 1000)));
+  return `
+    <article class="trash-row">
+      <div class="trash-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(item.category || t('otherCategory'))} · ${escapeHtml(t('trashDaysLeft', { days }))}</span>
+      </div>
+      <div class="trash-actions">
+        <button
+          class="trash-restore-button"
+          type="button"
+          data-trash-id="${escapeHtml(item.trashId)}"
+          aria-label="${escapeHtml(t('restoreFavorite', { title }))}"
+        >${escapeHtml(t('restoreShort'))}</button>
+        <button
+          class="trash-delete-button"
+          type="button"
+          data-trash-id="${escapeHtml(item.trashId)}"
+          aria-label="${escapeHtml(t('permanentlyDeleteFavorite', { title }))}"
+        >${escapeHtml(t('deletePermanentlyShort'))}</button>
+      </div>
+    </article>
+  `;
+}
+
+async function renderRecentlyDeleted() {
+  try {
+    const items = await getRecentlyDeletedItems();
+    elements.trashEntryCount.textContent = String(items.length);
+    elements.trashViewSummary.textContent = t('trashSummary', { count: items.length });
+    elements.trashList.innerHTML = items.length
+      ? items.map(renderTrashRow).join('')
+      : `<div class="empty-state trash-empty">${escapeHtml(t('trashEmpty'))}</div>`;
+    elements.trashList.querySelectorAll('.trash-restore-button').forEach((button) => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        await restoreRecentlyDeleted(button.dataset.trashId);
+      });
+    });
+    elements.trashList.querySelectorAll('.trash-delete-button').forEach((button) => {
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        await permanentlyDeleteRecentlyDeleted(button.dataset.trashId);
+      });
+    });
+  } catch (error) {
+    elements.trashStatus.textContent = t('trashOperationFailed', { message: error.message });
+    elements.trashStatus.className = 'compact-settings-status error';
+  }
+}
+
+async function restoreRecentlyDeleted(trashId) {
+  try {
+    if (isExtension) {
+      const response = await sendRuntimeMessage('restoreDeletedFavorite', { trashId });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message ? response.message : t('trashRestoreFailed'));
+      }
+    } else {
+      const result = await storageGet(['favorites', 'recentlyDeleted']);
+      const items = Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : [];
+      const entry = items.find((item) => item.trashId === trashId);
+      if (!entry) throw new Error(t('trashItemMissing'));
+      const {
+        trashId: _trashId,
+        deletedAt: _deletedAt,
+        expiresAt: _expiresAt,
+        ...favorite
+      } = entry;
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      await storageSet({
+        favorites: [favorite, ...favorites.filter((item) => item.url !== favorite.url)],
+        recentlyDeleted: items.filter((item) => item.trashId !== trashId)
+      });
+    }
+    elements.trashStatus.textContent = t('trashRestored');
+    elements.trashStatus.className = 'compact-settings-status success';
+    await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
+  } catch (error) {
+    elements.trashStatus.textContent = t('trashOperationFailed', { message: error.message });
+    elements.trashStatus.className = 'compact-settings-status error';
+    await renderRecentlyDeleted();
+  }
+}
+
+async function permanentlyDeleteRecentlyDeleted(trashId) {
+  try {
+    if (isExtension) {
+      const response = await sendRuntimeMessage('permanentlyDeleteFavorite', { trashId });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message ? response.message : t('trashDeleteFailed'));
+      }
+    } else {
+      const result = await storageGet(['recentlyDeleted']);
+      const items = Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : [];
+      await storageSet({
+        recentlyDeleted: items.filter((item) => item.trashId !== trashId)
+      });
+    }
+    elements.trashStatus.textContent = t('trashDeletedPermanently');
+    elements.trashStatus.className = 'compact-settings-status success';
+    await renderRecentlyDeleted();
+  } catch (error) {
+    elements.trashStatus.textContent = t('trashOperationFailed', { message: error.message });
+    elements.trashStatus.className = 'compact-settings-status error';
+    await renderRecentlyDeleted();
+  }
+}
+
 function showFavoritesByCategory(category, favorites) {
   elements.recentSection.classList.add('hidden');
   elements.foldersHeading.classList.add('hidden');
@@ -598,14 +921,28 @@ async function deleteFavorite(url) {
           : t('browserBookmarkUnavailable'));
       }
     } else {
-      const result = await storageGet(['favorites']);
+      const result = await storageGet(['favorites', 'recentlyDeleted']);
       const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      const recentlyDeleted = Array.isArray(result.recentlyDeleted)
+        ? result.recentlyDeleted
+        : [];
+      const removedFavorites = favorites.filter((favorite) => favorite.url === url);
+      const now = Date.now();
       await storageSet({
-        favorites: favorites.filter((favorite) => favorite.url !== url)
+        favorites: favorites.filter((favorite) => favorite.url !== url),
+        recentlyDeleted: [
+          ...removedFavorites.map((favorite, index) => ({
+            ...favorite,
+            trashId: `trash-${now}-${index}`,
+            deletedAt: now,
+            expiresAt: now + TRASH_RETENTION_MS
+          })),
+          ...recentlyDeleted.filter((item) => item.url !== url)
+        ]
       });
     }
     elements.errorStatus.classList.add('hidden');
-    await Promise.all([renderFolders(), renderRecentFavorites()]);
+    await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
     return true;
   } catch (error) {
     console.error('Favorite delete failed:', error);
@@ -660,17 +997,22 @@ elements.languageBtn.addEventListener('click', switchLanguage);
 elements.viewAllBtn.addEventListener('click', toggleAllFavorites);
 elements.favoritesNavBtn.addEventListener('click', () => showView('favorites'));
 elements.categoryFoldersNavBtn.addEventListener('click', () => showView('categories'));
+elements.favoritesBackBtn.addEventListener('click', () => showView('home'));
+elements.categoriesBackBtn.addEventListener('click', () => showView('home'));
+elements.trashNavBtn.addEventListener('click', () => showView('trash'));
+elements.trashBackBtn.addEventListener('click', () => showView('favorites'));
 elements.settingsBtn.addEventListener('click', () => {
   showView(activeView === 'home' ? 'settings' : 'home');
 });
 
 async function showView(view) {
-  activeView = ['home', 'favorites', 'categories', 'settings'].includes(view)
+  activeView = ['home', 'favorites', 'categories', 'trash', 'settings'].includes(view)
     ? view
     : 'home';
   elements.mainView.classList.toggle('hidden', activeView !== 'home');
   elements.favoritesView.classList.toggle('hidden', activeView !== 'favorites');
   elements.categoriesView.classList.toggle('hidden', activeView !== 'categories');
+  elements.trashView.classList.toggle('hidden', activeView !== 'trash');
   elements.settingsView.classList.toggle('hidden', activeView !== 'settings');
   applyLanguage();
 
@@ -678,6 +1020,10 @@ async function showView(view) {
     await Promise.all([renderFolders(), renderRecentFavorites()]);
   } else if (activeView === 'categories') {
     populateCategoryManager();
+  } else if (activeView === 'trash') {
+    elements.trashStatus.textContent = '';
+    elements.trashStatus.className = 'compact-settings-status';
+    await renderRecentlyDeleted();
   } else if (activeView === 'settings') {
     populateCompactSettings();
   } else {
@@ -688,12 +1034,21 @@ async function showView(view) {
 function populateCompactSettings() {
   elements.compactThemeStyle.value = normalizeThemeStyle(currentSettings.themeStyle);
   previewThemeStyle = elements.compactThemeStyle.value;
+  pendingBackgroundImage = currentSettings.customBackgroundImage || '';
   elements.compactDarkMode.checked = currentSettings.colorMode === 'dark'
     || currentSettings.themeStyle === 'black';
+  elements.compactPopupWidth.value = String(currentSettings.popupWidth);
+  elements.compactPopupHeight.value = String(currentSettings.popupHeight);
   elements.compactAiEnabled.checked = currentSettings.aiEnabled;
   elements.compactProvider.value = currentSettings.apiProvider || 'ollama';
   elements.compactModel.value = currentSettings.model || SmartFavAI.getProvider(elements.compactProvider.value).model;
   elements.compactApiKey.value = currentSettings.apiKey || '';
+  elements.compactClassificationMode.value = currentSettings.classificationMode || 'weighted';
+  elements.compactKeywordWeight.value = String(
+    SmartFavClassifier.normalizeWeights(currentSettings.classificationWeights).keywords
+  );
+  elements.compactAiAutoClassify.checked = currentSettings.aiAutoClassify !== false;
+  elements.compactAiCreateCategories.checked = Boolean(currentSettings.aiCreateCategories);
   elements.compactBrowserBookmarksEnabled.checked = currentSettings.browserBookmarksEnabled;
   elements.compactBookmarkWriteMode.value = currentSettings.bookmarkWriteMode || 'overwrite';
   elements.compactBookmarkOrganizeEnabled.checked = Boolean(currentSettings.bookmarkOrganizeEnabled);
@@ -703,6 +1058,8 @@ function populateCompactSettings() {
   updateCompactAIFields(false);
   updateCompactBookmarkFields();
   updateAppearancePreview();
+  updatePopupSizeLabels();
+  updateBackgroundImagePreview();
 }
 
 function populateCategoryManager() {
@@ -727,8 +1084,95 @@ function updateAppearancePreview() {
   elements.compactDarkMode.checked = colorMode === 'dark';
   elements.compactDarkMode.disabled = themeStyle === 'black';
   elements.compactDarkMode.title = themeStyle === 'black' ? t('blackThemeDarkOnly') : '';
-  applyAppearance({ ...currentSettings, themeStyle, colorMode });
+  applyAppearance({
+    ...currentSettings,
+    themeStyle,
+    colorMode,
+    popupWidth: normalizePopupDimension(
+      elements.compactPopupWidth.value,
+      320,
+      520,
+      DEFAULT_SETTINGS.popupWidth
+    ),
+    popupHeight: normalizePopupDimension(
+      elements.compactPopupHeight.value,
+      420,
+      600,
+      DEFAULT_SETTINGS.popupHeight
+    ),
+    customBackgroundImage: pendingBackgroundImage
+  });
   previewThemeStyle = themeStyle;
+}
+
+function updatePopupSizeLabels() {
+  const width = normalizePopupDimension(
+    elements.compactPopupWidth.value,
+    320,
+    520,
+    DEFAULT_SETTINGS.popupWidth
+  );
+  const height = normalizePopupDimension(
+    elements.compactPopupHeight.value,
+    420,
+    600,
+    DEFAULT_SETTINGS.popupHeight
+  );
+  elements.compactPopupWidthValue.textContent = `${width}px`;
+  elements.compactPopupHeightValue.textContent = `${height}px`;
+}
+
+function updateBackgroundImagePreview() {
+  elements.backgroundImagePreview.classList.toggle('has-image', Boolean(pendingBackgroundImage));
+  elements.backgroundImagePreview.style.backgroundImage = pendingBackgroundImage
+    ? `url(${JSON.stringify(pendingBackgroundImage)})`
+    : '';
+  elements.clearBackgroundImageBtn.disabled = !pendingBackgroundImage;
+}
+
+function readBackgroundImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+      reject(new Error(t('backgroundImageTypeError')));
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      reject(new Error(t('backgroundImageTooLarge')));
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result || '')), { once: true });
+    reader.addEventListener('error', () => reject(new Error(t('backgroundImageReadFailed'))), { once: true });
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleBackgroundImageChange() {
+  const file = elements.compactBackgroundImage.files
+    && elements.compactBackgroundImage.files[0];
+  if (!file) return;
+  try {
+    pendingBackgroundImage = await readBackgroundImage(file);
+    updateBackgroundImagePreview();
+    updateAppearancePreview();
+    showCompactSettingsStatus(t('backgroundImageReady'), 'success');
+  } catch (error) {
+    showCompactSettingsStatus(error.message, 'error');
+  } finally {
+    elements.compactBackgroundImage.value = '';
+  }
+}
+
+function clearBackgroundImage() {
+  pendingBackgroundImage = '';
+  updateBackgroundImagePreview();
+  updateAppearancePreview();
+  showCompactSettingsStatus(t('backgroundImageCleared'), 'success');
+}
+
+function handlePopupSizeInput() {
+  updatePopupSizeLabels();
+  updateAppearancePreview();
 }
 
 function handleThemeStyleChange() {
@@ -744,6 +1188,7 @@ function updateCompactAIFields(resetModel) {
   elements.compactAiFields.classList.toggle('hidden', !elements.compactAiEnabled.checked);
   elements.compactApiKeyField.classList.toggle('hidden', !provider.requiresKey);
   if (resetModel || !elements.compactModel.value.trim()) elements.compactModel.value = provider.model;
+  elements.compactKeywordWeightValue.textContent = elements.compactKeywordWeight.value;
 }
 
 function updateCompactBookmarkFields() {
@@ -871,7 +1316,8 @@ function reclassifyFavoriteRecord(favorite, settings) {
   const suggestion = SmartFavClassifier.classify({
     title: favorite.title || favorite.url,
     url: favorite.url,
-    description: favorite.description || ''
+    description: favorite.description || '',
+    keywords: favorite.keywords || []
   }, settings);
   return {
     ...favorite,
@@ -929,6 +1375,13 @@ elements.compactThemeStyle.addEventListener('change', handleThemeStyleChange);
 elements.compactDarkMode.addEventListener('change', updateAppearancePreview);
 elements.compactAiEnabled.addEventListener('change', () => updateCompactAIFields(false));
 elements.compactProvider.addEventListener('change', () => updateCompactAIFields(true));
+elements.compactPopupWidth.addEventListener('input', handlePopupSizeInput);
+elements.compactPopupHeight.addEventListener('input', handlePopupSizeInput);
+elements.compactBackgroundImage.addEventListener('change', handleBackgroundImageChange);
+elements.clearBackgroundImageBtn.addEventListener('click', clearBackgroundImage);
+elements.compactKeywordWeight.addEventListener('input', () => {
+  elements.compactKeywordWeightValue.textContent = elements.compactKeywordWeight.value;
+});
 elements.compactBrowserBookmarksEnabled.addEventListener('change', handleBrowserBookmarkWriteChange);
 elements.compactBookmarkOrganizeEnabled.addEventListener('change', handleBookmarkOrganizeChange);
 elements.compactBookmarkAutoCapture.addEventListener('change', handleBookmarkAutoCaptureChange);
@@ -1000,7 +1453,29 @@ elements.compactSaveBtn.addEventListener('click', async () => {
     colorMode: elements.compactThemeStyle.value === 'black' || elements.compactDarkMode.checked
       ? 'dark'
       : 'light',
+    popupWidth: normalizePopupDimension(
+      elements.compactPopupWidth.value,
+      320,
+      520,
+      DEFAULT_SETTINGS.popupWidth
+    ),
+    popupHeight: normalizePopupDimension(
+      elements.compactPopupHeight.value,
+      420,
+      600,
+      DEFAULT_SETTINGS.popupHeight
+    ),
+    customBackgroundImage: pendingBackgroundImage,
     aiEnabled: elements.compactAiEnabled.checked,
+    aiAutoClassify: elements.compactAiAutoClassify.checked,
+    aiCreateCategories: elements.compactAiCreateCategories.checked,
+    classificationMode: elements.compactClassificationMode.value === 'vector'
+      ? 'vector'
+      : 'weighted',
+    classificationWeights: SmartFavClassifier.normalizeWeights({
+      ...currentSettings.classificationWeights,
+      keywords: Number(elements.compactKeywordWeight.value)
+    }),
     apiProvider: elements.compactProvider.value,
     apiKey: elements.compactApiKey.value.trim(),
     model: elements.compactModel.value.trim() || provider.model,
@@ -1017,6 +1492,9 @@ elements.compactSaveBtn.addEventListener('click', async () => {
     showCategorySuggestion(currentSuggestion);
   }
   showCompactSettingsStatus(t('settingsSaved'), 'success');
+  if (currentTabInfo && currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
+    await enhanceCurrentSuggestion({ automatic: true });
+  }
   const organizeActive = currentSettings.bookmarkOrganizeEnabled;
   if (organizeActive && !wasOrganizeActive) {
     await runOrganizeBookmarks();

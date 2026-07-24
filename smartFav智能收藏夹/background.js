@@ -1,8 +1,20 @@
 // SmartFav Background - 后台脚本
 importScripts('classifier.js', 'browser-bookmarks.js');
 
+const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const TRASH_CLEANUP_ALARM = 'smartfav-trash-cleanup';
+
+function scheduleTrashCleanup() {
+  if (!chrome.alarms || typeof chrome.alarms.create !== 'function') return;
+  chrome.alarms.create(TRASH_CLEANUP_ALARM, {
+    delayInMinutes: 1,
+    periodInMinutes: 60
+  });
+}
+
 // 监听安装事件
 chrome.runtime.onInstalled.addListener((details) => {
+  scheduleTrashCleanup();
   if (details.reason === 'install') {
     const language = chrome.i18n.getUILanguage().toLowerCase().startsWith('zh')
       ? 'zh_CN'
@@ -35,7 +47,14 @@ chrome.runtime.onInstalled.addListener((details) => {
       language,
       themeStyle: 'glass',
       colorMode: 'light',
+      popupWidth: 360,
+      popupHeight: 560,
+      customBackgroundImage: '',
       aiEnabled: false,
+      aiAutoClassify: true,
+      aiCreateCategories: false,
+      classificationMode: 'weighted',
+      classificationWeights: SmartFavClassifier.DEFAULT_WEIGHTS,
       apiProvider: 'ollama',
       apiKey: '',
       model: 'qwen2.5:3b',
@@ -49,7 +68,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     
     chrome.storage.local.set({
       settings: defaultSettings,
-      favorites: []
+      favorites: [],
+      recentlyDeleted: []
     });
     
     console.log('SmartFav 已安装');
@@ -58,10 +78,11 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 function getStoredState() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['settings', 'favorites'], (result) => {
+    chrome.storage.local.get(['settings', 'favorites', 'recentlyDeleted'], (result) => {
       resolve({
         settings: result.settings || {},
-        favorites: Array.isArray(result.favorites) ? result.favorites : []
+        favorites: Array.isArray(result.favorites) ? result.favorites : [],
+        recentlyDeleted: Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : []
       });
     });
   });
@@ -77,6 +98,85 @@ function setStoredState(values) {
   return new Promise((resolve) => {
     chrome.storage.local.set(values, resolve);
   });
+}
+
+function createTrashEntry(favorite, now = Date.now()) {
+  return {
+    ...favorite,
+    trashId: `trash-${now}-${Math.random().toString(36).slice(2, 9)}`,
+    deletedAt: now,
+    expiresAt: now + TRASH_RETENTION_MS
+  };
+}
+
+async function cleanupRecentlyDeleted(now = Date.now()) {
+  const { recentlyDeleted } = await getStoredState();
+  const retained = recentlyDeleted.filter((item) => {
+    const deletedAt = Number(item.deletedAt) || now;
+    const expiresAt = Number(item.expiresAt) || deletedAt + TRASH_RETENTION_MS;
+    return expiresAt > now;
+  });
+  const removed = recentlyDeleted.length - retained.length;
+  if (removed) await setStoredState({ recentlyDeleted: retained });
+  return { status: 'ok', removed, items: retained };
+}
+
+async function getRecentlyDeleted() {
+  return cleanupRecentlyDeleted();
+}
+
+async function permanentlyDeleteFavorite(trashId) {
+  const normalizedId = String(trashId || '').trim();
+  const { recentlyDeleted } = await getStoredState();
+  const nextRecentlyDeleted = recentlyDeleted.filter((item) => item.trashId !== normalizedId);
+  const removed = recentlyDeleted.length - nextRecentlyDeleted.length;
+  if (removed) await setStoredState({ recentlyDeleted: nextRecentlyDeleted });
+  return { status: 'ok', removed, items: nextRecentlyDeleted };
+}
+
+async function restoreDeletedFavorite(trashId) {
+  const normalizedId = String(trashId || '').trim();
+  const { settings, favorites, recentlyDeleted } = await getStoredState();
+  const entry = recentlyDeleted.find((item) => item.trashId === normalizedId);
+  if (!entry) return { status: 'missing', restored: 0 };
+
+  const {
+    trashId: _trashId,
+    deletedAt: _deletedAt,
+    expiresAt: _expiresAt,
+    ...favorite
+  } = entry;
+  let browserStatus = settings.browserBookmarksEnabled ? 'ok' : 'disabled';
+  if (settings.browserBookmarksEnabled) {
+    try {
+      const browserResult = await SmartFavBookmarks.writeFavorite(
+        favorite,
+        settings,
+        chrome.bookmarks
+      );
+      browserStatus = browserResult.status;
+    } catch (error) {
+      browserStatus = 'error';
+      console.error('SmartFav browser restore failed:', error);
+    }
+  }
+
+  const nextFavorites = [
+    favorite,
+    ...favorites.filter((item) => item.url !== favorite.url)
+  ];
+  const nextRecentlyDeleted = recentlyDeleted.filter((item) => item.trashId !== normalizedId);
+  await setStoredState({
+    favorites: nextFavorites,
+    recentlyDeleted: nextRecentlyDeleted
+  });
+  return {
+    status: 'ok',
+    restored: 1,
+    browserStatus,
+    favorite,
+    items: nextRecentlyDeleted
+  };
 }
 
 // 扩展被移除后重新加载、或换目录加载时，chrome.storage 可能是空的，
@@ -169,9 +269,10 @@ async function deleteFavorite(url) {
   const normalizedUrl = String(url || '').trim();
   if (!normalizedUrl) return { status: 'invalid', removed: 0, browserRemoved: 0 };
 
-  const { settings, favorites } = await getStoredState();
+  const { settings, favorites, recentlyDeleted } = await getStoredState();
+  const removedFavorites = favorites.filter((item) => item.url === normalizedUrl);
   const nextFavorites = favorites.filter((item) => item.url !== normalizedUrl);
-  const removed = favorites.length - nextFavorites.length;
+  const removed = removedFavorites.length;
   if (!removed) return { status: 'ok', removed: 0, browserRemoved: 0 };
 
   let browserRemoved = 0;
@@ -187,10 +288,19 @@ async function deleteFavorite(url) {
     browserRemoved = browserResult.removed || 0;
   }
 
-  await setStoredFavorites(nextFavorites);
+  const now = Date.now();
+  const nextRecentlyDeleted = [
+    ...removedFavorites.map((favorite, index) => createTrashEntry(favorite, now + index)),
+    ...recentlyDeleted.filter((item) => item.url !== normalizedUrl)
+  ];
+  await setStoredState({
+    favorites: nextFavorites,
+    recentlyDeleted: nextRecentlyDeleted
+  });
   return {
     status: 'ok',
     removed,
+    trashed: removed,
     browserRemoved,
     syncEnabled: Boolean(settings.browserBookmarksEnabled)
   };
@@ -206,7 +316,8 @@ async function reclassifyFavorites() {
     const suggestion = SmartFavClassifier.classify({
       title: favorite.title || favorite.url,
       url: favorite.url,
-      description: favorite.description || ''
+      description: favorite.description || '',
+      keywords: favorite.keywords || []
     }, settings);
     const next = {
       ...favorite,
@@ -368,6 +479,26 @@ chrome.bookmarks.onCreated.addListener((id, node) => {
   });
 });
 
+if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 'function') {
+  chrome.runtime.onStartup.addListener(() => {
+    scheduleTrashCleanup();
+    cleanupRecentlyDeleted().catch((error) => {
+      console.error('SmartFav trash cleanup failed:', error);
+    });
+  });
+}
+
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm || alarm.name !== TRASH_CLEANUP_ALARM) return;
+    cleanupRecentlyDeleted().catch((error) => {
+      console.error('SmartFav trash cleanup failed:', error);
+    });
+  });
+}
+
+scheduleTrashCleanup();
+
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'recoverManagedFavorites') {
@@ -390,6 +521,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'deleteFavorite') {
     deleteFavorite(message.url)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'getRecentlyDeleted') {
+    getRecentlyDeleted()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'restoreDeletedFavorite') {
+    restoreDeletedFavorite(message.trashId)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'permanentlyDeleteFavorite') {
+    permanentlyDeleteFavorite(message.trashId)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'cleanupRecentlyDeleted') {
+    cleanupRecentlyDeleted()
       .then(sendResponse)
       .catch((error) => sendResponse({ status: 'error', message: error.message }));
     return true;

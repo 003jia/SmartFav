@@ -26,6 +26,12 @@
 
   const DEFAULT_CATEGORIES = DEFAULTS.zh_CN.categories;
   const DEFAULT_RULES = DEFAULTS.zh_CN.rules;
+  const DEFAULT_WEIGHTS = {
+    title: 5,
+    keywords: 6,
+    url: 3,
+    description: 1
+  };
 
   function getDefaults(language) {
     const source = String(language || '').toLowerCase().startsWith('zh')
@@ -82,6 +88,86 @@
     return count;
   }
 
+  function normalizeWeights(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    return Object.fromEntries(Object.entries(DEFAULT_WEIGHTS).map(([field, fallback]) => {
+      const parsed = Number(source[field]);
+      return [field, Number.isFinite(parsed) ? Math.min(10, Math.max(1, parsed)) : fallback];
+    }));
+  }
+
+  function tokenizeVectorText(value) {
+    const segments = normalize(value).match(/[\p{Script=Han}]+|[a-z0-9]+/gu) || [];
+    const tokens = [];
+    segments.forEach((segment) => {
+      const characters = Array.from(segment);
+      tokens.push(segment);
+      if (/^\p{Script=Han}+$/u.test(segment)) {
+        characters.forEach((character) => tokens.push(character));
+        for (let index = 0; index < characters.length - 1; index += 1) {
+          tokens.push(characters.slice(index, index + 2).join(''));
+        }
+        return;
+      }
+      if (segment.length >= 4) {
+        for (let index = 0; index < segment.length - 2; index += 1) {
+          tokens.push(`#${segment.slice(index, index + 3)}`);
+        }
+      }
+    });
+    return tokens;
+  }
+
+  function addToVector(vector, value, weight) {
+    tokenizeVectorText(value).forEach((token) => {
+      vector.set(token, (vector.get(token) || 0) + weight);
+    });
+  }
+
+  function cosineSimilarity(left, right) {
+    if (!left.size || !right.size) return 0;
+    let dot = 0;
+    let leftMagnitude = 0;
+    let rightMagnitude = 0;
+    left.forEach((value, token) => {
+      leftMagnitude += value * value;
+      dot += value * (right.get(token) || 0);
+    });
+    right.forEach((value) => {
+      rightMagnitude += value * value;
+    });
+    if (!leftMagnitude || !rightMagnitude) return 0;
+    return dot / Math.sqrt(leftMagnitude * rightMagnitude);
+  }
+
+  function createPageVector(tabInfo, weights) {
+    const vector = new Map();
+    addToVector(vector, tabInfo.title, weights.title);
+    addToVector(
+      vector,
+      Array.isArray(tabInfo.keywords) ? tabInfo.keywords.join(' ') : tabInfo.keywords,
+      weights.keywords
+    );
+    addToVector(vector, tabInfo.url, weights.url);
+    addToVector(vector, tabInfo.description, weights.description);
+    return vector;
+  }
+
+  function createCategoryVector(category, keywords) {
+    const vector = new Map();
+    addToVector(vector, category, 2);
+    keywords.forEach((keyword) => addToVector(vector, keyword, 1));
+    return vector;
+  }
+
+  function scoreRatios(scores) {
+    const total = Object.values(scores).reduce((sum, score) => sum + Math.max(0, score), 0);
+    return Object.fromEntries(Object.entries(scores).map(([category, score]) => [
+      category,
+      total ? Math.round((Math.max(0, score) / total) * 1000) / 10 : 0
+    ]));
+  }
+
   function classify(tabInfo, settings = {}) {
     const categories = Array.isArray(settings.categories) && settings.categories.length
       ? settings.categories
@@ -91,13 +177,18 @@
       : 'en';
     const rules = mergeRules(categories, settings.keywordRules, language);
     const index = buildKeywordIndex(rules);
-    const scores = Object.fromEntries(categories.map((category) => [category, 0]));
+    const weightedScores = Object.fromEntries(categories.map((category) => [category, 0]));
     const matches = Object.fromEntries(categories.map((category) => [category, new Set()]));
     const defaultCategories = new Set(getDefaults(language).categories);
+    const weights = normalizeWeights(settings.classificationWeights);
     const fields = [
-      { value: normalize(tabInfo.title), weight: 5 },
-      { value: normalize(tabInfo.url), weight: 3 },
-      { value: normalize(tabInfo.description), weight: 1 }
+      { value: normalize(tabInfo.title), weight: weights.title },
+      {
+        value: normalize(Array.isArray(tabInfo.keywords) ? tabInfo.keywords.join(' ') : tabInfo.keywords),
+        weight: weights.keywords
+      },
+      { value: normalize(tabInfo.url), weight: weights.url },
+      { value: normalize(tabInfo.description), weight: weights.description }
     ];
 
     index.forEach((matchedCategories, keyword) => {
@@ -109,12 +200,23 @@
           // broad built-in buckets, so a direct match should be able to win
           // even when a generic default rule also matches the page URL.
           const categoryBoost = defaultCategories.has(category) ? 1 : 2;
-          scores[category] += occurrences * weight * Math.min(keyword.length, 5) * categoryBoost;
+          weightedScores[category] += occurrences * weight * Math.min(keyword.length, 5) * categoryBoost;
           matches[category].add(keyword);
         });
       });
     });
 
+    const pageVector = createPageVector(tabInfo, weights);
+    const vectorScores = Object.fromEntries(categories.map((category) => {
+      const similarity = cosineSimilarity(
+        pageVector,
+        createCategoryVector(category, rules[category] || [])
+      );
+      const categoryBoost = defaultCategories.has(category) ? 1 : 1.12;
+      return [category, Math.round(similarity * 1000 * categoryBoost) / 10];
+    }));
+    const method = settings.classificationMode === 'vector' ? 'vector' : 'weighted';
+    const scores = method === 'vector' ? vectorScores : weightedScores;
     const preferredFallback = language === 'zh_CN' ? '其他' : 'Other';
     const fallback = categories.includes(preferredFallback)
       ? preferredFallback
@@ -122,14 +224,31 @@
     const ranked = categories
       .filter((category) => category !== fallback)
       .sort((a, b) => scores[b] - scores[a]);
-    const category = ranked[0] && scores[ranked[0]] > 0 ? ranked[0] : fallback;
-    const tags = Array.from(matches[category] || []).slice(0, 4);
+    const minimumScore = method === 'vector' ? 4 : 0;
+    const category = ranked[0] && scores[ranked[0]] > minimumScore ? ranked[0] : fallback;
+    const vectorTags = (rules[category] || [])
+      .map((keyword) => {
+        const keywordVector = new Map();
+        addToVector(keywordVector, keyword, 1);
+        return { keyword, similarity: cosineSimilarity(pageVector, keywordVector) };
+      })
+      .filter((item) => item.similarity > 0)
+      .sort((a, b) => b.similarity - a.similarity)
+      .map((item) => item.keyword);
+    const tags = (method === 'vector'
+      ? vectorTags
+      : Array.from(matches[category] || []))
+      .slice(0, 4);
     const score = scores[category] || 0;
 
     return {
       category,
       tags,
       score,
+      scores,
+      scoreRatios: scoreRatios(scores),
+      method,
+      weights,
       source: 'local',
       summary: tags.length
         ? language === 'zh_CN'
@@ -167,10 +286,14 @@
     DEFAULTS,
     DEFAULT_CATEGORIES,
     DEFAULT_RULES,
+    DEFAULT_WEIGHTS,
     getDefaults,
     buildKeywordIndex,
     classify,
+    cosineSimilarity,
     mergeRules,
+    normalizeWeights,
+    tokenizeVectorText,
     rulesToText,
     textToRules
   };

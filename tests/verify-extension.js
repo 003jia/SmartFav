@@ -23,11 +23,12 @@ const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.7.0');
+  assert.equal(manifest.version, '1.8.0');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
   assert.ok(manifest.permissions.includes('bookmarks'));
+  assert.ok(manifest.permissions.includes('alarms'));
   ['16', '32', '48', '128'].forEach((size) => {
     assert.equal(manifest.icons[size], `icons/icon${size}.png`);
     assert.equal(manifest.action.default_icon[size], `icons/icon${size}.png`);
@@ -55,7 +56,20 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="categoryFoldersNavBtn"/);
   assert.match(popupHtml, /id="favoritesView"/);
   assert.match(popupHtml, /id="categoriesView"/);
+  assert.match(popupHtml, /id="trashView"/);
+  assert.match(popupHtml, /id="favoritesBackBtn"/);
+  assert.match(popupHtml, /id="categoriesBackBtn"/);
+  assert.match(popupHtml, /id="trashBackBtn"/);
+  assert.match(popupHtml, /id="trashNavBtn"/);
   assert.match(popupHtml, /id="categorySaveBtn"/);
+  assert.match(popupHtml, /id="compactPopupWidth"/);
+  assert.match(popupHtml, /id="compactPopupHeight"/);
+  assert.match(popupHtml, /id="compactBackgroundImage"/);
+  assert.match(popupHtml, /id="clearBackgroundImageBtn"/);
+  assert.match(popupHtml, /id="compactClassificationMode"/);
+  assert.match(popupHtml, /id="compactKeywordWeight"/);
+  assert.match(popupHtml, /id="compactAiAutoClassify"/);
+  assert.match(popupHtml, /id="compactAiCreateCategories"/);
   const mainViewHtml = popupHtml.match(/<main id="mainView">([\s\S]*?)<\/main>/)?.[1] || '';
   assert.doesNotMatch(mainViewHtml, /id="recentSection"|id="foldersList"|id="categoryRulesList"/);
   assert.doesNotMatch(popupHtml, /id="libraryPanel"|id="libraryToggleBtn"/);
@@ -83,11 +97,22 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /SmartFavBookmarks\.syncManagedCategories/);
   assert.match(backgroundJs, /message\.type === 'reclassifyFavorites'/);
   assert.match(backgroundJs, /message\.type === 'deleteFavorite'/);
+  assert.match(backgroundJs, /message\.type === 'getRecentlyDeleted'/);
+  assert.match(backgroundJs, /message\.type === 'restoreDeletedFavorite'/);
+  assert.match(backgroundJs, /message\.type === 'permanentlyDeleteFavorite'/);
+  assert.match(backgroundJs, /TRASH_RETENTION_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.match(backgroundJs, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
   assert.match(popupJs, /type:\s*'reclassifyFavorites'/);
   assert.match(popupJs, /async function showView\(view\)/);
   assert.match(popupJs, /activeView === 'favorites'/);
   assert.match(popupJs, /activeView === 'categories'/);
+  assert.match(popupJs, /activeView === 'trash'/);
+  assert.match(popupJs, /async function applyAIResponse\(response\)/);
+  assert.match(popupJs, /currentSettings\.aiCreateCategories/);
+  assert.match(popupJs, /classificationMode/);
+  assert.match(popupJs, /customBackgroundImage/);
+  assert.match(popupJs, /async function renderRecentlyDeleted\(\)/);
   assert.match(backgroundJs, /bookmarkOrganizeEnabled/);
   assert.match(backgroundJs, /bookmarkAutoCaptureEnabled/);
   assert.doesNotMatch(
@@ -132,12 +157,18 @@ function verifyManifestAndLocales() {
   );
   assert.match(i18n.MESSAGES.zh_CN.browserBookmarksHint, /收藏或删除/);
   assert.match(i18n.MESSAGES.en.browserBookmarksHint, /saving or deleting/);
-  assert.match(popupCss, /html,\s*body\s*\{[^}]*width:\s*360px;[^}]*min-width:\s*360px;/s);
+  assert.match(popupCss, /--popup-width:\s*360px/);
+  assert.match(popupCss, /--popup-height:\s*560px/);
+  assert.match(popupCss, /html,\s*body\s*\{[^}]*width:\s*var\(--popup-width\);[^}]*height:\s*var\(--popup-height\);/s);
   assert.match(popupCss, /html,\s*body\s*\{[^}]*border-radius:\s*var\(--shell-radius\);[^}]*overflow:\s*hidden;/s);
   assert.match(popupCss, /body\s*\{[^}]*padding:\s*0;[^}]*contain:\s*paint;/s);
   assert.match(popupCss, /--shell-radius:\s*0/);
   assert.match(popupCss, /\.app-shell\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s);
-  assert.match(popupCss, /\.panel-view,\s*\.settings-view\s*\{[^}]*max-height:\s*480px;[^}]*overflow-y:\s*auto;/s);
+  assert.match(popupCss, /\.panel-view,\s*\.settings-view\s*\{[^}]*overflow-y:\s*auto;/s);
+  assert.match(popupCss, /\.content-back-button\s*\{/);
+  assert.match(popupCss, /\.background-image-field\s*\{/);
+  assert.match(popupCss, /\.trash-row\s*\{/);
+  assert.match(popupCss, /data-custom-background="true"/);
   assert.match(popupCss, /\.home-navigation-item\s*\{[^}]*min-height:\s*54px;/s);
   assert.match(popupCss, /--shadow:\s*none/);
   assert.match(popupCss, /blur\(18px\)\s+saturate\(135%\)/);
@@ -213,6 +244,57 @@ function verifyBilingualClassification() {
   );
   assert.equal(customFolderResult.category, '构建');
   assert.deepEqual(customFolderResult.tags, ['build']);
+
+  const weightedKeywordResult = classifier.classify(
+    {
+      title: 'Weekly notes',
+      url: 'https://example.com/notes',
+      description: '',
+      keywords: ['browser automation', 'playwright']
+    },
+    {
+      language: 'en',
+      categories: ['Automation', 'Other'],
+      keywordRules: {
+        Automation: ['browser automation', 'playwright'],
+        Other: []
+      },
+      classificationMode: 'weighted',
+      classificationWeights: {
+        title: 1,
+        keywords: 10,
+        url: 1,
+        description: 1
+      }
+    }
+  );
+  assert.equal(weightedKeywordResult.category, 'Automation');
+  assert.equal(weightedKeywordResult.method, 'weighted');
+  assert.equal(weightedKeywordResult.weights.keywords, 10);
+  assert.ok(weightedKeywordResult.scoreRatios.Automation > 99);
+
+  const vectorResult = classifier.classify(
+    {
+      title: 'Vector database guide',
+      url: 'https://example.com/guide',
+      description: 'Semantic retrieval for an AI knowledge base',
+      keywords: ['embeddings', 'semantic search']
+    },
+    {
+      language: 'en',
+      categories: ['AI Research', 'Cooking', 'Other'],
+      keywordRules: {
+        'AI Research': ['vector database', 'embedding', 'semantic retrieval'],
+        Cooking: ['recipe', 'kitchen'],
+        Other: []
+      },
+      classificationMode: 'vector'
+    }
+  );
+  assert.equal(vectorResult.category, 'AI Research');
+  assert.equal(vectorResult.method, 'vector');
+  assert.ok(vectorResult.score > 4);
+  assert.ok(vectorResult.scoreRatios['AI Research'] > vectorResult.scoreRatios.Cooking);
 }
 
 function createMockBookmarks() {
@@ -505,13 +587,19 @@ async function verifyOrganizeBookmarks() {
   assert.equal(api.nodes.get(movedNode.parentId).title, 'Programming');
 }
 
-function createBackgroundHarness(initialSettings, initialFavorites = []) {
+function createBackgroundHarness(
+  initialSettings,
+  initialFavorites = [],
+  initialRecentlyDeleted = []
+) {
   const bookmarks = createMockBookmarks();
   const state = {
     settings: { ...initialSettings },
-    favorites: [...initialFavorites]
+    favorites: [...initialFavorites],
+    recentlyDeleted: [...initialRecentlyDeleted]
   };
   const listeners = {};
+  const alarmSchedules = [];
   const errors = [];
   const chromeMock = {
     bookmarks: {
@@ -534,9 +622,24 @@ function createBackgroundHarness(initialSettings, initialFavorites = []) {
           listeners.onInstalled = listener;
         }
       },
+      onStartup: {
+        addListener(listener) {
+          listeners.onStartup = listener;
+        }
+      },
       onMessage: {
         addListener(listener) {
           listeners.onMessage = listener;
+        }
+      }
+    },
+    alarms: {
+      create(name, options) {
+        alarmSchedules.push({ name, options });
+      },
+      onAlarm: {
+        addListener(listener) {
+          listeners.onAlarm = listener;
         }
       }
     },
@@ -566,7 +669,7 @@ function createBackgroundHarness(initialSettings, initialFavorites = []) {
     }
   });
   vm.runInContext(backgroundJs, context, { filename: 'background.js' });
-  return { bookmarks, state, listeners, errors, context };
+  return { bookmarks, state, listeners, alarmSchedules, errors, context };
 }
 
 async function createBookmark(api, data) {
@@ -734,7 +837,14 @@ async function verifyBackgroundBookmarkFlows() {
   assert.equal(syncedDeleteResult.status, 'ok');
   assert.equal(syncedDeleteResult.removed, 1);
   assert.equal(syncedDeleteResult.browserRemoved, 1);
+  assert.equal(syncedDeleteResult.trashed, 1);
   assert.equal(syncedDeleteHarness.state.favorites.length, 0);
+  assert.equal(syncedDeleteHarness.state.recentlyDeleted.length, 1);
+  assert.equal(
+    syncedDeleteHarness.state.recentlyDeleted[0].expiresAt
+      - syncedDeleteHarness.state.recentlyDeleted[0].deletedAt,
+    7 * 24 * 60 * 60 * 1000
+  );
   const syncedDeleteMatches = [...syncedDeleteHarness.bookmarks.nodes.values()]
     .filter((node) => node.url === syncedDeleteUrl);
   assert.equal(syncedDeleteMatches.length, 1);
@@ -761,8 +871,62 @@ async function verifyBackgroundBookmarkFlows() {
   );
   assert.equal(localDeleteResult.status, 'ok');
   assert.equal(localDeleteResult.browserRemoved, 0);
+  assert.equal(localDeleteResult.trashed, 1);
   assert.equal(localDeleteHarness.state.favorites.length, 0);
+  assert.equal(localDeleteHarness.state.recentlyDeleted.length, 1);
   assert.ok(localDeleteHarness.bookmarks.nodes.has(localBrowserCopy.id));
+
+  const trashedItem = localDeleteHarness.state.recentlyDeleted[0];
+  const restoreResult = await sendBackgroundMessage(
+    localDeleteHarness,
+    { type: 'restoreDeletedFavorite', trashId: trashedItem.trashId }
+  );
+  assert.equal(restoreResult.status, 'ok');
+  assert.equal(restoreResult.restored, 1);
+  assert.equal(localDeleteHarness.state.favorites.length, 1);
+  assert.equal(localDeleteHarness.state.favorites[0].url, localDeleteUrl);
+  assert.equal(localDeleteHarness.state.recentlyDeleted.length, 0);
+
+  await sendBackgroundMessage(
+    localDeleteHarness,
+    { type: 'deleteFavorite', url: localDeleteUrl }
+  );
+  const permanentlyDeletedItem = localDeleteHarness.state.recentlyDeleted[0];
+  const permanentDeleteResult = await sendBackgroundMessage(
+    localDeleteHarness,
+    {
+      type: 'permanentlyDeleteFavorite',
+      trashId: permanentlyDeletedItem.trashId
+    }
+  );
+  assert.equal(permanentDeleteResult.status, 'ok');
+  assert.equal(permanentDeleteResult.removed, 1);
+  assert.equal(localDeleteHarness.state.favorites.length, 0);
+  assert.equal(localDeleteHarness.state.recentlyDeleted.length, 0);
+
+  const expiredHarness = createBackgroundHarness(
+    baseSettings,
+    [],
+    [{
+      title: 'Expired bookmark',
+      url: 'https://expired.example.com',
+      category: 'Other',
+      trashId: 'expired-1',
+      deletedAt: Date.now() - (8 * 24 * 60 * 60 * 1000),
+      expiresAt: Date.now() - 1000
+    }]
+  );
+  const cleanupResult = await sendBackgroundMessage(
+    expiredHarness,
+    { type: 'cleanupRecentlyDeleted' }
+  );
+  assert.equal(cleanupResult.status, 'ok');
+  assert.equal(cleanupResult.removed, 1);
+  assert.equal(expiredHarness.state.recentlyDeleted.length, 0);
+  assert.equal(expiredHarness.alarmSchedules[0].name, 'smartfav-trash-cleanup');
+  assert.equal(expiredHarness.alarmSchedules[0].options.periodInMinutes, 60);
+  assert.equal(typeof expiredHarness.listeners.onAlarm, 'function');
+  assert.equal(typeof expiredHarness.listeners.onStartup, 'function');
 
   // 浏览器同步失败时不能先删本地记录，否则会产生不可恢复的不一致。
   const failedDeleteHarness = createBackgroundHarness(

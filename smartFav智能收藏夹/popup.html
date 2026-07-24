@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.7.0-r2">
+  <link rel="stylesheet" href="styles/popup.css?v=1.8.0">
 </head>
 <body>
   <div class="app-shell">
@@ -90,9 +90,23 @@
     </main>
 
     <section id="favoritesView" class="panel-view favorites-view hidden" aria-labelledby="favoritesViewTitle">
-      <div class="view-intro">
-        <h1 id="favoritesViewTitle" data-i18n="myFavorites">我的收藏</h1>
-        <p id="favoritesViewSummary">0 条收藏 · 0 个分类</p>
+      <div class="view-back-row">
+        <button class="content-back-button" id="favoritesBackBtn" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m12.5 4.5-5 5 5 5"></path>
+          </svg>
+          <span data-i18n="backToHome">返回主页</span>
+        </button>
+      </div>
+      <div class="view-intro view-intro-with-action">
+        <div>
+          <h1 id="favoritesViewTitle" data-i18n="myFavorites">我的收藏</h1>
+          <p id="favoritesViewSummary">0 条收藏 · 0 个分类</p>
+        </div>
+        <button class="trash-entry-button" id="trashNavBtn" type="button">
+          <span data-i18n="recentlyDeleted">最近删除</span>
+          <small id="trashEntryCount">0</small>
+        </button>
       </div>
 
       <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
@@ -113,6 +127,14 @@
     </section>
 
     <section id="categoriesView" class="panel-view categories-view hidden" aria-labelledby="categoryManagerTitle">
+      <div class="view-back-row">
+        <button class="content-back-button" id="categoriesBackBtn" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m12.5 4.5-5 5 5 5"></path>
+          </svg>
+          <span data-i18n="backToHome">返回主页</span>
+        </button>
+      </div>
       <div class="view-intro">
         <h1 id="categoryManagerTitle" data-i18n="categoryFolders">分类文件夹</h1>
         <p data-i18n="categoryReclassifyHint">保存规则后，会重新检查全部已有收藏并更新分类。</p>
@@ -135,6 +157,23 @@
 
       <div id="categorySettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
       <button class="button button-primary category-save" id="categorySaveBtn" type="button" data-i18n="saveAndReclassify">保存并重新分类</button>
+    </section>
+
+    <section id="trashView" class="panel-view trash-view hidden" aria-labelledby="trashViewTitle">
+      <div class="view-back-row">
+        <button class="content-back-button" id="trashBackBtn" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m12.5 4.5-5 5 5 5"></path>
+          </svg>
+          <span data-i18n="backToFavorites">返回我的收藏</span>
+        </button>
+      </div>
+      <div class="view-intro">
+        <h1 id="trashViewTitle" data-i18n="recentlyDeleted">最近删除</h1>
+        <p id="trashViewSummary" data-i18n="trashRetentionHint">删除的收藏保留 7 天，之后自动永久删除。</p>
+      </div>
+      <div id="trashStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
+      <div id="trashList" class="trash-list"></div>
     </section>
 
     <section id="settingsView" class="settings-view hidden" aria-labelledby="compactSettingsTitle">
@@ -161,6 +200,38 @@
           </span>
           <input id="compactDarkMode" type="checkbox">
         </label>
+
+        <div class="popup-size-fields">
+          <label class="compact-range-field" for="compactPopupWidth">
+            <span>
+              <strong data-i18n="popupWidth">弹窗宽度</strong>
+              <output id="compactPopupWidthValue">360px</output>
+            </span>
+            <input id="compactPopupWidth" type="range" min="320" max="520" step="20" value="360">
+          </label>
+          <label class="compact-range-field" for="compactPopupHeight">
+            <span>
+              <strong data-i18n="popupHeight">弹窗高度</strong>
+              <output id="compactPopupHeightValue">560px</output>
+            </span>
+            <input id="compactPopupHeight" type="range" min="420" max="600" step="20" value="560">
+          </label>
+        </div>
+
+        <div class="background-image-field">
+          <div class="background-image-copy">
+            <strong data-i18n="customBackground">自定义背景图</strong>
+            <small data-i18n="customBackgroundHint">支持 JPG、PNG、WebP、GIF，图片仅保存在浏览器本地</small>
+          </div>
+          <div id="backgroundImagePreview" class="background-image-preview" aria-hidden="true"></div>
+          <div class="background-image-actions">
+            <label class="background-upload-button" for="compactBackgroundImage">
+              <span data-i18n="chooseImage">选择图片</span>
+              <input id="compactBackgroundImage" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+            </label>
+            <button id="clearBackgroundImageBtn" type="button" data-i18n="clearImage">清除图片</button>
+          </div>
+        </div>
       </div>
 
       <label class="compact-toggle" for="compactAiEnabled">
@@ -191,6 +262,39 @@
         <label class="compact-field" id="compactApiKeyField" for="compactApiKey">
           <span>API Key</span>
           <input id="compactApiKey" type="password" autocomplete="off" data-i18n-placeholder="apiKeyLocal" placeholder="仅保存在浏览器本地">
+        </label>
+
+        <label class="compact-field" for="compactClassificationMode">
+          <span data-i18n="classificationStrategy">分类策略</span>
+          <select id="compactClassificationMode">
+            <option value="weighted" data-i18n="weightedTagMatching">标签比例权重</option>
+            <option value="vector" data-i18n="keywordVectorMatching">关键词向量匹配</option>
+          </select>
+        </label>
+
+        <label class="compact-range-field ai-weight-field" for="compactKeywordWeight">
+          <span>
+            <strong data-i18n="websiteTagWeight">网站标签权重</strong>
+            <output id="compactKeywordWeightValue">6</output>
+          </span>
+          <input id="compactKeywordWeight" type="range" min="1" max="10" step="1" value="6">
+          <small data-i18n="websiteTagWeightHint">标题 5 · 标签可调 · 网址 3 · 描述 1</small>
+        </label>
+
+        <label class="compact-inline-toggle" for="compactAiAutoClassify">
+          <span>
+            <strong data-i18n="aiAutoClassify">自动使用 AI 分类</strong>
+            <small data-i18n="aiAutoClassifyHint">打开插件后自动优化本地分类结果</small>
+          </span>
+          <input id="compactAiAutoClassify" type="checkbox">
+        </label>
+
+        <label class="compact-inline-toggle" for="compactAiCreateCategories">
+          <span>
+            <strong data-i18n="aiCreateCategories">允许 AI 创建分类文件夹</strong>
+            <small data-i18n="aiCreateCategoriesHint">仅在现有分类都不适合时创建一个新文件夹</small>
+          </span>
+          <input id="compactAiCreateCategories" type="checkbox">
         </label>
 
         <button class="compact-test-button" id="compactTestBtn" type="button" data-i18n="testConnection">测试连接</button>
@@ -237,10 +341,10 @@
     </section>
   </div>
 
-  <script src="i18n.js?v=1.7.0-r2"></script>
-  <script src="classifier.js?v=1.7.0-r2"></script>
-  <script src="browser-bookmarks.js?v=1.7.0-r2"></script>
-  <script src="ai-client.js?v=1.7.0-r2"></script>
-  <script src="popup.js?v=1.7.0-r2"></script>
+  <script src="i18n.js?v=1.8.0"></script>
+  <script src="classifier.js?v=1.8.0"></script>
+  <script src="browser-bookmarks.js?v=1.8.0"></script>
+  <script src="ai-client.js?v=1.8.0"></script>
+  <script src="popup.js?v=1.8.0"></script>
 </body>
 </html>

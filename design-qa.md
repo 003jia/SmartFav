@@ -1,5 +1,25 @@
 # SmartFav browser popup design QA
 
+## Version 1.8.0 navigation, sizing, trash, and background
+
+Browser verification at the native 360 × 560 popup size confirmed that the
+My Favorites and Category Folders views both render a content-level back
+button directly beneath the toolbar header, at x 14 and y 61, with no
+horizontal overflow. The current repository screenshot is
+`docs/smartfav-popup.png`.
+
+The appearance controls resized the rendered document and app shell from
+360 × 560 to 440 × 480 in real time; the settings view retained zero
+horizontal overflow at the new size. A local PNG upload set the custom
+background data URL, preview state, and clear control without producing
+console errors.
+
+Recently Deleted verification moved a favorite out of the collection,
+displayed a 7-day remaining period, restored it, deleted it again, and then
+permanently removed it. The final list and count updated immediately at every
+step. Static background-worker tests additionally verify hourly alarm
+scheduling and automatic removal of expired entries.
+
 ## Version 1.6.0 native popup return
 
 The shipping surface has returned to the browser-owned toolbar popup through

@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "__MSG_extensionDescription__",
   "default_locale": "zh_CN",
   "permissions": [
     "storage",
     "activeTab",
     "scripting",
-    "bookmarks"
+    "bookmarks",
+    "alarms"
   ],
   "host_permissions": [
     "http://localhost:11434/*",
