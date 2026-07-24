@@ -196,6 +196,62 @@ async function deleteFavorite(url) {
   };
 }
 
+// 分类文件夹或关键词规则变更后，使用已保存的标题、网址和描述
+// 重新运行本地分类器；开启浏览器同步时，同时移动 SmartFav 受管书签。
+async function reclassifyFavorites() {
+  const { settings, favorites } = await getStoredState();
+  let updated = 0;
+  const reclassifiedAt = Date.now();
+  const nextFavorites = favorites.map((favorite) => {
+    const suggestion = SmartFavClassifier.classify({
+      title: favorite.title || favorite.url,
+      url: favorite.url,
+      description: favorite.description || ''
+    }, settings);
+    const next = {
+      ...favorite,
+      category: suggestion.category,
+      tags: suggestion.tags,
+      summary: suggestion.summary,
+      classificationSource: 'local',
+      reclassifiedAt
+    };
+    if (
+      favorite.category !== next.category
+      || JSON.stringify(favorite.tags || []) !== JSON.stringify(next.tags || [])
+      || favorite.summary !== next.summary
+      || favorite.classificationSource !== next.classificationSource
+    ) {
+      updated += 1;
+    }
+    return next;
+  });
+
+  await setStoredFavorites(nextFavorites);
+  let browserMoved = 0;
+  let browserStatus = settings.browserBookmarksEnabled ? 'ok' : 'disabled';
+  try {
+    const browserResult = await SmartFavBookmarks.syncManagedCategories(
+      nextFavorites,
+      settings,
+      chrome.bookmarks
+    );
+    browserMoved = browserResult.moved || 0;
+    browserStatus = browserResult.status;
+  } catch (error) {
+    browserStatus = 'error';
+    console.error('SmartFav browser category sync failed:', error);
+  }
+
+  return {
+    status: 'ok',
+    total: nextFavorites.length,
+    updated,
+    browserMoved,
+    browserStatus
+  };
+}
+
 // 整理浏览器收藏夹：读取全部书签 → 本地分类 → 导入 SmartFav 分类；
 // 仅当"允许整理浏览器收藏夹"开启时才把书签移动进 SmartFav/分类 文件夹
 async function organizeBrowserBookmarks() {
@@ -334,6 +390,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'deleteFavorite') {
     deleteFavorite(message.url)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'reclassifyFavorites') {
+    reclassifyFavorites()
       .then(sendResponse)
       .catch((error) => sendResponse({ status: 'error', message: error.message }));
     return true;

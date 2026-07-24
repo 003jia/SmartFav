@@ -118,6 +118,41 @@
     return { status: 'removed', removed: matches.length };
   }
 
+  // 分类规则更新后，仅移动 SmartFav 受管目录中的已有收藏。
+  // 不创建缺失收藏，也不触碰用户在其他浏览器文件夹中的同网址记录。
+  async function syncManagedCategories(favorites, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) return { status: 'disabled', moved: 0 };
+    if (!api) return { status: 'unavailable', moved: 0 };
+
+    const managed = await collectManagedBookmarks(api);
+    if (!managed.length) return { status: 'ok', moved: 0 };
+    const desiredByUrl = new Map(
+      (favorites || [])
+        .filter((favorite) => favorite && favorite.url)
+        .map((favorite) => [favorite.url, favorite])
+    );
+    const root = await findOrCreateRoot(api);
+    const categoryFolders = new Map();
+    let moved = 0;
+
+    for (const node of managed) {
+      const favorite = desiredByUrl.get(node.url);
+      if (!favorite) continue;
+      const category = String(favorite.category || 'Other').trim() || 'Other';
+      if (!categoryFolders.has(category)) {
+        categoryFolders.set(
+          category,
+          await findOrCreateCategory(api, root.id, category)
+        );
+      }
+      const targetFolder = categoryFolders.get(category);
+      if (node.parentId === targetFolder.id) continue;
+      await callApi(api, 'move', node.id, { parentId: targetFolder.id });
+      moved += 1;
+    }
+    return { status: 'ok', moved };
+  }
+
   // 收集浏览器收藏夹中所有不在 SmartFav 文件夹内的书签
   async function collectExternalBookmarks(api) {
     const tree = await callApi(api, 'getTree');
@@ -238,6 +273,7 @@
     findUrlMatches,
     writeFavorite,
     removeFavorite,
+    syncManagedCategories,
     collectExternalBookmarks,
     collectManagedBookmarks,
     isInsideSmartFavFolder,

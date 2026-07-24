@@ -305,7 +305,8 @@ select:focus-visible {
 :root[data-theme="glass"] .header,
 :root[data-theme="glass"] .save-card,
 :root[data-theme="glass"] .content-section,
-:root[data-theme="glass"] .library-entry,
+:root[data-theme="glass"] .home-navigation,
+:root[data-theme="glass"] .panel-view,
 :root[data-theme="glass"] .settings-view {
   -webkit-backdrop-filter: var(--panel-backdrop-filter);
   backdrop-filter: var(--panel-backdrop-filter);
@@ -635,7 +636,7 @@ select:focus-visible {
   cursor: pointer;
   font-size: 13px;
   font-weight: 680;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: box-shadow 0.16s ease, transform 0.18s ease;
 }
 
 .button:active {
@@ -645,12 +646,12 @@ select:focus-visible {
 .button-primary {
   flex: 1;
   background: linear-gradient(180deg, var(--primary), var(--primary-hover));
+  box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0);
   color: var(--primary-contrast);
 }
 
-.button-primary:hover {
-  background: var(--primary-hover);
-  box-shadow: 0 3px 10px var(--focus-ring);
+.button-primary:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 999px rgba(0, 0, 0, 0.12);
 }
 
 .button-secondary {
@@ -799,56 +800,63 @@ select:focus-visible {
   text-align: center;
 }
 
-.library-entry {
-  display: flex;
-  min-height: 56px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 0;
+.home-navigation {
+  display: grid;
   border-top: 1px solid var(--line);
-  border-radius: 0;
   background: var(--surface);
 }
 
-.library-entry h2 {
-  margin: 0;
+.home-navigation-item {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease;
+}
+
+.home-navigation-item:hover {
+  background: var(--surface-soft);
+}
+
+.home-navigation-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.home-navigation-copy strong {
   font-size: 12px;
   font-weight: 700;
 }
 
-.library-entry p {
-  margin: 4px 0 0;
+.home-navigation-copy small {
+  overflow: hidden;
   color: var(--muted);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.library-toggle {
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--surface);
-  color: var(--primary);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 650;
-  transition: border-color 0.16s ease, background 0.16s ease;
+.home-navigation-item svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
-.library-toggle:hover {
-  border-color: var(--tag-line);
-  background: var(--tag-bg);
-}
-
-.library-panel {
-  max-height: 185px;
-  margin-top: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
+.panel-view,
 .settings-view {
   max-height: 480px;
   overflow-x: hidden;
@@ -856,22 +864,29 @@ select:focus-visible {
   background: var(--surface);
 }
 
+.view-intro,
 .settings-intro {
   padding: 13px 14px;
   border-bottom: 1px solid var(--line);
 }
 
+.view-intro h1,
 .settings-intro h1 {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
 }
 
+.view-intro p,
 .settings-intro p {
   margin: 5px 0 0;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.favorites-view .content-section:first-of-type {
+  border-top: 0;
 }
 
 .appearance-fields {
@@ -1029,19 +1044,6 @@ select:focus-visible {
 .category-manager {
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
-}
-
-.category-manager-heading h2 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.category-manager-heading p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.45;
 }
 
 .category-add-row {
@@ -1202,6 +1204,7 @@ select:focus-visible {
 .compact-settings-status.success { color: var(--success); }
 .compact-settings-status.error { color: var(--danger); }
 
+.category-save,
 .compact-save {
   width: calc(100% - 28px);
   margin: 6px 14px 14px;
@@ -1279,12 +1282,14 @@ select:focus-visible {
 }
 
 /* ---------- 外观细节：统一细滚动条 ---------- */
-.library-panel::-webkit-scrollbar,
+.favorites-view::-webkit-scrollbar,
+.categories-view::-webkit-scrollbar,
 .settings-view::-webkit-scrollbar {
   width: 8px;
 }
 
-.library-panel::-webkit-scrollbar-thumb,
+.favorites-view::-webkit-scrollbar-thumb,
+.categories-view::-webkit-scrollbar-thumb,
 .settings-view::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 8px;
@@ -1292,12 +1297,14 @@ select:focus-visible {
   background-clip: content-box;
 }
 
-.library-panel::-webkit-scrollbar-thumb:hover,
+.favorites-view::-webkit-scrollbar-thumb:hover,
+.categories-view::-webkit-scrollbar-thumb:hover,
 .settings-view::-webkit-scrollbar-thumb:hover {
   background-color: var(--muted);
 }
 
-.library-panel::-webkit-scrollbar-track,
+.favorites-view::-webkit-scrollbar-track,
+.categories-view::-webkit-scrollbar-track,
 .settings-view::-webkit-scrollbar-track {
   background: transparent;
 }

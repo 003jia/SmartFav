@@ -23,7 +23,7 @@ const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.6.7');
+  assert.equal(manifest.version, '1.7.0');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -51,6 +51,14 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="compactNewCategory"/);
   assert.match(popupHtml, /id="compactAddCategoryBtn"/);
   assert.match(popupHtml, /id="categoryRulesList"/);
+  assert.match(popupHtml, /id="favoritesNavBtn"/);
+  assert.match(popupHtml, /id="categoryFoldersNavBtn"/);
+  assert.match(popupHtml, /id="favoritesView"/);
+  assert.match(popupHtml, /id="categoriesView"/);
+  assert.match(popupHtml, /id="categorySaveBtn"/);
+  const mainViewHtml = popupHtml.match(/<main id="mainView">([\s\S]*?)<\/main>/)?.[1] || '';
+  assert.doesNotMatch(mainViewHtml, /id="recentSection"|id="foldersList"|id="categoryRulesList"/);
+  assert.doesNotMatch(popupHtml, /id="libraryPanel"|id="libraryToggleBtn"/);
   assert.doesNotMatch(popupHtml, /id="compactKeywordRules"/);
   ['glass', 'white', 'gray', 'black', 'parchment'].forEach((themeStyle) => {
     assert.match(popupHtml, new RegExp(`option value="${themeStyle}"`));
@@ -71,8 +79,15 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /collectManagedBookmarks/);
   assert.match(popupJs, /type:\s*'recoverManagedFavorites'/);
   assert.match(backgroundJs, /SmartFavBookmarks\.removeFavorite/);
+  assert.match(backgroundJs, /async function reclassifyFavorites\(\)/);
+  assert.match(backgroundJs, /SmartFavBookmarks\.syncManagedCategories/);
+  assert.match(backgroundJs, /message\.type === 'reclassifyFavorites'/);
   assert.match(backgroundJs, /message\.type === 'deleteFavorite'/);
   assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
+  assert.match(popupJs, /type:\s*'reclassifyFavorites'/);
+  assert.match(popupJs, /async function showView\(view\)/);
+  assert.match(popupJs, /activeView === 'favorites'/);
+  assert.match(popupJs, /activeView === 'categories'/);
   assert.match(backgroundJs, /bookmarkOrganizeEnabled/);
   assert.match(backgroundJs, /bookmarkAutoCaptureEnabled/);
   assert.doesNotMatch(
@@ -122,9 +137,18 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /body\s*\{[^}]*padding:\s*0;[^}]*contain:\s*paint;/s);
   assert.match(popupCss, /--shell-radius:\s*0/);
   assert.match(popupCss, /\.app-shell\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s);
-  assert.match(popupCss, /\.library-panel\s*\{[^}]*max-height:\s*185px;[^}]*overflow-y:\s*auto;/s);
+  assert.match(popupCss, /\.panel-view,\s*\.settings-view\s*\{[^}]*max-height:\s*480px;[^}]*overflow-y:\s*auto;/s);
+  assert.match(popupCss, /\.home-navigation-item\s*\{[^}]*min-height:\s*54px;/s);
   assert.match(popupCss, /--shadow:\s*none/);
   assert.match(popupCss, /blur\(18px\)\s+saturate\(135%\)/);
+  assert.match(
+    popupCss,
+    /\.button-primary:hover:not\(:disabled\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 999px rgba\(0,\s*0,\s*0,\s*0\.12\);/s
+  );
+  assert.doesNotMatch(
+    popupCss,
+    /\.button-primary:hover[^{]*\{[^}]*background:/s
+  );
   assert.doesNotMatch(popupCss, /body::before/);
   assert.doesNotMatch(popupCss, /body::after/);
   assert.doesNotMatch(popupCss, /\.app-shell::before/);
@@ -171,6 +195,24 @@ function verifyBilingualClassification() {
   );
   assert.equal(customResult.category, 'Design');
   assert.deepEqual(customResult.tags, ['figma', 'interface']);
+
+  const customFolderResult = classifier.classify(
+    {
+      title: 'GitHub · Build and ship software',
+      url: 'https://github.com/',
+      description: ''
+    },
+    {
+      language: 'zh_CN',
+      categories: [...zhDefaults.categories, '构建'],
+      keywordRules: {
+        ...zhDefaults.keywordRules,
+        构建: ['build']
+      }
+    }
+  );
+  assert.equal(customFolderResult.category, '构建');
+  assert.deepEqual(customFolderResult.tags, ['build']);
 }
 
 function createMockBookmarks() {
@@ -354,6 +396,33 @@ async function verifyBookmarkModes() {
   assert.equal(disabledRemoval.status, 'disabled');
   assert.equal(disabledRemoval.removed, 0);
   assert.ok(removalApi.nodes.has(externalCopy.id));
+
+  // 规则重分后只移动 SmartFav 受管书签，外部同网址收藏保持原位。
+  const managedSyncApi = createMockBookmarks();
+  const managedSyncSettings = {
+    browserBookmarksEnabled: true,
+    bookmarkWriteMode: 'add'
+  };
+  await browserBookmarks.writeFavorite(
+    { title: 'Research paper', url: 'https://paper.example.com', category: 'Other' },
+    managedSyncSettings,
+    managedSyncApi
+  );
+  const externalPaper = await new Promise((resolve) => managedSyncApi.create(
+    { title: 'External paper', url: 'https://paper.example.com' },
+    resolve
+  ));
+  const managedSyncResult = await browserBookmarks.syncManagedCategories(
+    [{ title: 'Research paper', url: 'https://paper.example.com', category: 'Research' }],
+    managedSyncSettings,
+    managedSyncApi
+  );
+  assert.equal(managedSyncResult.status, 'ok');
+  assert.equal(managedSyncResult.moved, 1);
+  const managedPaper = [...managedSyncApi.nodes.values()]
+    .find((node) => node.url === 'https://paper.example.com' && node.id !== externalPaper.id);
+  assert.equal(managedSyncApi.nodes.get(managedPaper.parentId).title, 'Research');
+  assert.equal(managedSyncApi.nodes.get(externalPaper.id).parentId, 'other');
 }
 
 async function verifyOrganizeBookmarks() {
@@ -582,6 +651,56 @@ async function verifyBackgroundBookmarkFlows() {
   );
   assert.equal(repeatedRecovery.recovered, 0);
   assert.equal(recoveryHarness.state.favorites.length, 2);
+
+  // 新增分类和规则后，已有 SmartFav 收藏会重新读取已存信息并更新分类；
+  // 开启浏览器同步时，受管浏览器书签也移动到新分类。
+  const reclassifyUrl = 'https://papers.example.com/research';
+  const reclassifyHarness = createBackgroundHarness(
+    {
+      ...baseSettings,
+      browserBookmarksEnabled: true,
+      categories: ['Research', 'Other'],
+      keywordRules: {
+        Research: ['research', 'paper'],
+        Other: []
+      }
+    },
+    [{
+      title: 'AI research paper',
+      url: reclassifyUrl,
+      description: 'A new research paper',
+      category: 'Other',
+      tags: [],
+      summary: 'No clear keyword match.',
+      classificationSource: 'local',
+      createdAt: 1
+    }]
+  );
+  await browserBookmarks.writeFavorite(
+    {
+      title: 'AI research paper',
+      url: reclassifyUrl,
+      category: 'Other'
+    },
+    reclassifyHarness.state.settings,
+    reclassifyHarness.bookmarks
+  );
+  const reclassifyResult = await sendBackgroundMessage(
+    reclassifyHarness,
+    { type: 'reclassifyFavorites' }
+  );
+  assert.equal(reclassifyResult.status, 'ok');
+  assert.equal(reclassifyResult.total, 1);
+  assert.equal(reclassifyResult.updated, 1);
+  assert.equal(reclassifyResult.browserMoved, 1);
+  assert.equal(reclassifyHarness.state.favorites[0].category, 'Research');
+  assert.ok(reclassifyHarness.state.favorites[0].tags.includes('research'));
+  const reclassifiedBrowserNode = [...reclassifyHarness.bookmarks.nodes.values()]
+    .find((node) => node.url === reclassifyUrl);
+  assert.equal(
+    reclassifyHarness.bookmarks.nodes.get(reclassifiedBrowserNode.parentId).title,
+    'Research'
+  );
 
   // 开启同步时，插件删除先移除 SmartFav 受管浏览器收藏，再删除本地记录；
   // 外部文件夹中的同网址收藏继续保留。

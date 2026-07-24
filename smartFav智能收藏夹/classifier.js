@@ -93,6 +93,7 @@
     const index = buildKeywordIndex(rules);
     const scores = Object.fromEntries(categories.map((category) => [category, 0]));
     const matches = Object.fromEntries(categories.map((category) => [category, new Set()]));
+    const defaultCategories = new Set(getDefaults(language).categories);
     const fields = [
       { value: normalize(tabInfo.title), weight: 5 },
       { value: normalize(tabInfo.url), weight: 3 },
@@ -104,7 +105,11 @@
         const occurrences = countOccurrences(value, keyword);
         if (!occurrences) return;
         matchedCategories.forEach((category) => {
-          scores[category] += occurrences * weight * Math.min(keyword.length, 5);
+          // User-created folders are intentionally more specific than the
+          // broad built-in buckets, so a direct match should be able to win
+          // even when a generic default rule also matches the page URL.
+          const categoryBoost = defaultCategories.has(category) ? 1 : 2;
+          scores[category] += occurrences * weight * Math.min(keyword.length, 5) * categoryBoost;
           matches[category].add(keyword);
         });
       });

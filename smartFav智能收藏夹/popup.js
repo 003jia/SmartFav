@@ -59,6 +59,8 @@ const elements = {
   settingsBtn: document.getElementById('settingsBtn'),
   brandCaption: document.getElementById('brandCaption'),
   mainView: document.getElementById('mainView'),
+  favoritesView: document.getElementById('favoritesView'),
+  categoriesView: document.getElementById('categoriesView'),
   settingsView: document.getElementById('settingsView'),
   loadingStatus: document.getElementById('loadingStatus'),
   successStatus: document.getElementById('successStatus'),
@@ -77,12 +79,17 @@ const elements = {
   aiMessage: document.getElementById('aiMessage'),
   privacyHint: document.getElementById('privacyHint'),
   foldersList: document.getElementById('foldersList'),
+  foldersSection: document.getElementById('foldersSection'),
+  foldersHeading: document.getElementById('foldersHeading'),
   totalCount: document.getElementById('totalCount'),
   librarySummary: document.getElementById('librarySummary'),
-  libraryPanel: document.getElementById('libraryPanel'),
-  libraryToggleBtn: document.getElementById('libraryToggleBtn'),
+  favoritesViewSummary: document.getElementById('favoritesViewSummary'),
+  categoryEntrySummary: document.getElementById('categoryEntrySummary'),
+  favoritesNavBtn: document.getElementById('favoritesNavBtn'),
+  categoryFoldersNavBtn: document.getElementById('categoryFoldersNavBtn'),
   compactThemeStyle: document.getElementById('compactThemeStyle'),
   compactDarkMode: document.getElementById('compactDarkMode'),
+  recentSection: document.getElementById('recentSection'),
   recentList: document.getElementById('recentList'),
   viewAllBtn: document.getElementById('viewAllBtn'),
   compactAiEnabled: document.getElementById('compactAiEnabled'),
@@ -100,6 +107,8 @@ const elements = {
   compactNewCategory: document.getElementById('compactNewCategory'),
   compactAddCategoryBtn: document.getElementById('compactAddCategoryBtn'),
   categoryRulesList: document.getElementById('categoryRulesList'),
+  categorySettingsStatus: document.getElementById('categorySettingsStatus'),
+  categorySaveBtn: document.getElementById('categorySaveBtn'),
   compactTestBtn: document.getElementById('compactTestBtn'),
   compactSettingsStatus: document.getElementById('compactSettingsStatus'),
   compactSaveBtn: document.getElementById('compactSaveBtn')
@@ -111,6 +120,7 @@ let currentSettings = DEFAULT_SETTINGS;
 let categoryDraft = [];
 let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
 let showingAllFavorites = false;
+let activeView = 'home';
 
 document.addEventListener('DOMContentLoaded', async () => {
   await recoverManagedBrowserFavorites();
@@ -118,9 +128,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   applyLanguage();
   await Promise.all([renderFolders(), renderRecentFavorites()]);
   await analyzeCurrentTab();
-  if (new URLSearchParams(window.location.search).get('view') === 'settings') {
-    toggleSettingsView(true);
-  }
+  const requestedView = new URLSearchParams(window.location.search).get('view');
+  await showView(['favorites', 'categories', 'settings'].includes(requestedView)
+    ? requestedView
+    : 'home');
 });
 
 function t(key, variables) {
@@ -212,14 +223,18 @@ function applyAppearance(settings = currentSettings) {
 
 function applyLanguage() {
   SmartFavI18n.applyToDocument(currentSettings.language, document);
-  const settingsOpen = !elements.settingsView.classList.contains('hidden');
   elements.languageBtn.textContent = currentSettings.language === 'zh_CN' ? 'EN' : '中';
   elements.languageBtn.setAttribute('aria-label', t('switchToEnglish'));
-  elements.settingsBtn.textContent = t(settingsOpen ? 'back' : 'settings');
-  elements.settingsBtn.setAttribute('aria-label', t(settingsOpen ? 'backToSave' : 'openSettings'));
-  elements.brandCaption.textContent = t(settingsOpen ? 'extensionSettings' : 'saveCurrentPage');
-  const expanded = elements.libraryToggleBtn.getAttribute('aria-expanded') === 'true';
-  elements.libraryToggleBtn.textContent = t(expanded ? 'collapse' : 'expand');
+  const isHome = activeView === 'home';
+  const captionKeys = {
+    home: 'saveCurrentPage',
+    favorites: 'myFavorites',
+    categories: 'categoryFolders',
+    settings: 'extensionSettings'
+  };
+  elements.settingsBtn.textContent = t(isHome ? 'settings' : 'back');
+  elements.settingsBtn.setAttribute('aria-label', t(isHome ? 'openSettings' : 'backToHome'));
+  elements.brandCaption.textContent = t(captionKeys[activeView] || 'saveCurrentPage');
   applyAppearance();
 }
 
@@ -231,7 +246,7 @@ async function toggleColorMode() {
   };
   await storageSet({ settings: currentSettings });
   applyAppearance();
-  if (!elements.settingsView.classList.contains('hidden')) {
+  if (activeView === 'settings') {
     elements.compactThemeStyle.value = normalizeThemeStyle(currentSettings.themeStyle);
     elements.compactDarkMode.checked = currentSettings.colorMode === 'dark';
     updateAppearancePreview();
@@ -252,13 +267,19 @@ async function switchLanguage() {
       : SmartFavClassifier.mergeRules(currentSettings.categories, currentSettings.keywordRules, nextLanguage)
   };
   await storageSet({ settings: currentSettings });
+  try {
+    await reclassifyStoredFavorites();
+  } catch (error) {
+    console.warn('SmartFav could not reclassify favorites after switching language:', error);
+  }
   applyLanguage();
   await Promise.all([renderFolders(), renderRecentFavorites()]);
   if (currentTabInfo) {
     currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
     showCategorySuggestion(currentSuggestion);
   }
-  if (!elements.settingsView.classList.contains('hidden')) populateCompactSettings();
+  if (activeView === 'settings') populateCompactSettings();
+  if (activeView === 'categories') populateCategoryManager();
 }
 
 function isUsingDefaultClassification(settings, language) {
@@ -456,10 +477,15 @@ async function renderFolders() {
     if (Object.prototype.hasOwnProperty.call(counts, favorite.category)) counts[favorite.category] += 1;
   });
   elements.totalCount.textContent = t('favoritesCount', { count: favorites.length });
-  elements.librarySummary.textContent = t('librarySummary', {
+  const librarySummary = t('librarySummary', {
     favorites: favorites.length,
     categories: categories.length
   });
+  elements.librarySummary.textContent = librarySummary;
+  elements.favoritesViewSummary.textContent = librarySummary;
+  elements.categoryEntrySummary.textContent = t('categoryCount', { count: categories.length });
+  elements.recentSection.classList.remove('hidden');
+  elements.foldersHeading.classList.remove('hidden');
   elements.foldersList.classList.remove('list-view');
   elements.foldersList.innerHTML = categories.map((category) => `
     <button class="folder-item" type="button" data-category="${escapeHtml(category)}">
@@ -494,6 +520,8 @@ async function toggleAllFavorites() {
 }
 
 function showFavoritesByCategory(category, favorites) {
+  elements.recentSection.classList.add('hidden');
+  elements.foldersHeading.classList.add('hidden');
   renderFavoriteList(category, favorites.filter((favorite) => favorite.category === category));
 }
 
@@ -630,25 +658,31 @@ function escapeHtml(value) {
 elements.modeBtn.addEventListener('click', toggleColorMode);
 elements.languageBtn.addEventListener('click', switchLanguage);
 elements.viewAllBtn.addEventListener('click', toggleAllFavorites);
-elements.libraryToggleBtn.addEventListener('click', () => {
-  const willExpand = elements.libraryPanel.classList.contains('hidden');
-  elements.libraryPanel.classList.toggle('hidden', !willExpand);
-  elements.libraryToggleBtn.textContent = t(willExpand ? 'collapse' : 'expand');
-  elements.libraryToggleBtn.setAttribute('aria-expanded', String(willExpand));
+elements.favoritesNavBtn.addEventListener('click', () => showView('favorites'));
+elements.categoryFoldersNavBtn.addEventListener('click', () => showView('categories'));
+elements.settingsBtn.addEventListener('click', () => {
+  showView(activeView === 'home' ? 'settings' : 'home');
 });
-elements.settingsBtn.addEventListener('click', () => toggleSettingsView());
 
-function toggleSettingsView(forceOpen) {
-  const shouldOpen = typeof forceOpen === 'boolean'
-    ? forceOpen
-    : elements.settingsView.classList.contains('hidden');
-  elements.mainView.classList.toggle('hidden', shouldOpen);
-  elements.settingsView.classList.toggle('hidden', !shouldOpen);
-  elements.settingsBtn.textContent = t(shouldOpen ? 'back' : 'settings');
-  elements.settingsBtn.setAttribute('aria-label', t(shouldOpen ? 'backToSave' : 'openSettings'));
-  elements.brandCaption.textContent = t(shouldOpen ? 'extensionSettings' : 'saveCurrentPage');
-  if (shouldOpen) populateCompactSettings();
-  else applyAppearance();
+async function showView(view) {
+  activeView = ['home', 'favorites', 'categories', 'settings'].includes(view)
+    ? view
+    : 'home';
+  elements.mainView.classList.toggle('hidden', activeView !== 'home');
+  elements.favoritesView.classList.toggle('hidden', activeView !== 'favorites');
+  elements.categoriesView.classList.toggle('hidden', activeView !== 'categories');
+  elements.settingsView.classList.toggle('hidden', activeView !== 'settings');
+  applyLanguage();
+
+  if (activeView === 'favorites') {
+    await Promise.all([renderFolders(), renderRecentFavorites()]);
+  } else if (activeView === 'categories') {
+    populateCategoryManager();
+  } else if (activeView === 'settings') {
+    populateCompactSettings();
+  } else {
+    applyAppearance();
+  }
 }
 
 function populateCompactSettings() {
@@ -664,6 +698,14 @@ function populateCompactSettings() {
   elements.compactBookmarkWriteMode.value = currentSettings.bookmarkWriteMode || 'overwrite';
   elements.compactBookmarkOrganizeEnabled.checked = Boolean(currentSettings.bookmarkOrganizeEnabled);
   elements.compactBookmarkAutoCapture.checked = Boolean(currentSettings.bookmarkAutoCaptureEnabled);
+  elements.compactSettingsStatus.textContent = '';
+  elements.compactSettingsStatus.className = 'compact-settings-status';
+  updateCompactAIFields(false);
+  updateCompactBookmarkFields();
+  updateAppearancePreview();
+}
+
+function populateCategoryManager() {
   const mergedRules = SmartFavClassifier.mergeRules(
     currentSettings.categories,
     currentSettings.keywordRules,
@@ -675,11 +717,8 @@ function populateCompactSettings() {
   }));
   elements.compactNewCategory.value = '';
   renderCategoryRules();
-  elements.compactSettingsStatus.textContent = '';
-  elements.compactSettingsStatus.className = 'compact-settings-status';
-  updateCompactAIFields(false);
-  updateCompactBookmarkFields();
-  updateAppearancePreview();
+  elements.categorySettingsStatus.textContent = '';
+  elements.categorySettingsStatus.className = 'compact-settings-status';
 }
 
 function updateAppearancePreview() {
@@ -740,7 +779,6 @@ function getClassificationDraftSettings() {
 async function handleBookmarkOrganizeChange() {
   const enabled = elements.compactBookmarkOrganizeEnabled.checked;
   await persistBookmarkSettings({
-    ...getClassificationDraftSettings(),
     bookmarkOrganizeEnabled: enabled
   });
   if (enabled) await runOrganizeBookmarks();
@@ -806,13 +844,13 @@ function addCategoryFolder() {
   }
   const normalizedName = normalizeCategoryName(name);
   if (categoryDraft.some((item) => normalizeCategoryName(item.name) === normalizedName)) {
-    showCompactSettingsStatus(t('duplicateCategory'), 'error');
+    showCategorySettingsStatus(t('duplicateCategory'), 'error');
     return;
   }
   categoryDraft.push({ name, keywords: [] });
   elements.compactNewCategory.value = '';
   renderCategoryRules();
-  showCompactSettingsStatus(t('categoryAdded'), 'success');
+  showCategorySettingsStatus(t('categoryAdded'), 'success');
   const newRuleInput = elements.categoryRulesList.querySelector(
     `.category-keywords-input[data-category-index="${categoryDraft.length - 1}"]`
   );
@@ -821,12 +859,70 @@ function addCategoryFolder() {
 
 function removeCategoryFolder(index) {
   if (categoryDraft.length <= 1) {
-    showCompactSettingsStatus(t('cannotRemoveLastCategory'), 'error');
+    showCategorySettingsStatus(t('cannotRemoveLastCategory'), 'error');
     return;
   }
   categoryDraft.splice(index, 1);
   renderCategoryRules();
-  showCompactSettingsStatus(t('categoryRemoved'), 'success');
+  showCategorySettingsStatus(t('categoryRemoved'), 'success');
+}
+
+function reclassifyFavoriteRecord(favorite, settings) {
+  const suggestion = SmartFavClassifier.classify({
+    title: favorite.title || favorite.url,
+    url: favorite.url,
+    description: favorite.description || ''
+  }, settings);
+  return {
+    ...favorite,
+    category: suggestion.category,
+    tags: suggestion.tags,
+    summary: suggestion.summary,
+    classificationSource: 'local',
+    reclassifiedAt: Date.now()
+  };
+}
+
+function classificationChanged(previous, next) {
+  return previous.category !== next.category
+    || JSON.stringify(previous.tags || []) !== JSON.stringify(next.tags || [])
+    || previous.summary !== next.summary
+    || previous.classificationSource !== next.classificationSource;
+}
+
+async function reclassifyStoredFavorites() {
+  if (isExtension) {
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'reclassifyFavorites' }, (result) => {
+        const runtimeError = chrome.runtime.lastError;
+        resolve(runtimeError
+          ? { status: 'error', message: runtimeError.message }
+          : result);
+      });
+    });
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message
+        ? response.message
+        : t('reclassifyFailed'));
+    }
+    return response;
+  }
+
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  let updated = 0;
+  const nextFavorites = favorites.map((favorite) => {
+    const next = reclassifyFavoriteRecord(favorite, currentSettings);
+    if (classificationChanged(favorite, next)) updated += 1;
+    return next;
+  });
+  await storageSet({ favorites: nextFavorites });
+  return {
+    status: 'ok',
+    total: nextFavorites.length,
+    updated,
+    browserMoved: 0
+  };
 }
 
 elements.compactThemeStyle.addEventListener('change', handleThemeStyleChange);
@@ -857,13 +953,42 @@ elements.categoryRulesList.addEventListener('click', (event) => {
   removeCategoryFolder(index);
 });
 
-elements.compactSaveBtn.addEventListener('click', async () => {
-  const categories = categoryDraft.map((item) => item.name);
-  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
-  if (!categories.length) {
-    showCompactSettingsStatus(t('keepOneCategory'), 'error');
+elements.categorySaveBtn.addEventListener('click', async () => {
+  const classificationSettings = getClassificationDraftSettings();
+  if (!classificationSettings.categories.length) {
+    showCategorySettingsStatus(t('keepOneCategory'), 'error');
     return;
   }
+
+  elements.categorySaveBtn.disabled = true;
+  elements.categorySaveBtn.textContent = t('reclassifying');
+  try {
+    currentSettings = {
+      ...currentSettings,
+      ...classificationSettings
+    };
+    await storageSet({ settings: currentSettings });
+    const result = await reclassifyStoredFavorites();
+    await Promise.all([renderFolders(), renderRecentFavorites()]);
+    if (currentTabInfo) {
+      currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+      showCategorySuggestion(currentSuggestion);
+    }
+    showCategorySettingsStatus(t('reclassifyDone', {
+      total: result.total || 0,
+      updated: result.updated || 0,
+      moved: result.browserMoved || 0
+    }), 'success');
+  } catch (error) {
+    showCategorySettingsStatus(t('reclassifyFailed', { message: error.message }), 'error');
+  } finally {
+    elements.categorySaveBtn.disabled = false;
+    elements.categorySaveBtn.textContent = t('saveAndReclassify');
+  }
+});
+
+elements.compactSaveBtn.addEventListener('click', async () => {
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
   if (elements.compactAiEnabled.checked && provider.requiresKey && !elements.compactApiKey.value.trim()) {
     showCompactSettingsStatus(t('apiKeyRequired'), 'error');
     return;
@@ -882,11 +1007,7 @@ elements.compactSaveBtn.addEventListener('click', async () => {
     browserBookmarksEnabled: elements.compactBrowserBookmarksEnabled.checked,
     bookmarkWriteMode: elements.compactBookmarkWriteMode.value === 'add' ? 'add' : 'overwrite',
     bookmarkOrganizeEnabled: elements.compactBookmarkOrganizeEnabled.checked,
-    bookmarkAutoCaptureEnabled: elements.compactBookmarkAutoCapture.checked,
-    categories,
-    keywordRules: Object.fromEntries(
-      categoryDraft.map((item) => [item.name, [...item.keywords]])
-    )
+    bookmarkAutoCaptureEnabled: elements.compactBookmarkAutoCapture.checked
   };
   await storageSet({ settings: currentSettings });
   applyAppearance();
@@ -945,7 +1066,6 @@ async function runOrganizeBookmarks() {
 }
 
 async function handleOrganizeNow() {
-  await persistBookmarkSettings(getClassificationDraftSettings());
   await runOrganizeBookmarks();
 }
 
@@ -979,4 +1099,9 @@ elements.compactTestBtn.addEventListener('click', async () => {
 function showCompactSettingsStatus(message, type) {
   elements.compactSettingsStatus.textContent = message;
   elements.compactSettingsStatus.className = `compact-settings-status ${type}`;
+}
+
+function showCategorySettingsStatus(message, type) {
+  elements.categorySettingsStatus.textContent = message;
+  elements.categorySettingsStatus.className = `compact-settings-status ${type}`;
 }

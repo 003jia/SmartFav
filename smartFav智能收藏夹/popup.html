@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.6.7">
+  <link rel="stylesheet" href="styles/popup.css?v=1.7.0-r2">
 </head>
 <body>
   <div class="app-shell">
@@ -67,32 +67,75 @@
         <p id="privacyHint" class="privacy-hint" data-i18n="privacyLocal">分类在浏览器本地完成，不会发送网页内容。</p>
       </section>
 
-      <section class="library-entry" aria-labelledby="libraryTitle">
-        <div>
-          <h2 id="libraryTitle" data-i18n="myFavorites">我的收藏</h2>
-          <p id="librarySummary">0 条收藏</p>
+      <nav class="home-navigation" data-i18n-aria-label="homeNavigation" aria-label="SmartFav 导航">
+        <button class="home-navigation-item" id="favoritesNavBtn" type="button">
+          <span class="home-navigation-copy">
+            <strong data-i18n="myFavorites">我的收藏</strong>
+            <small id="librarySummary">0 条收藏</small>
+          </span>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m7.5 4.5 5 5-5 5"></path>
+          </svg>
+        </button>
+        <button class="home-navigation-item" id="categoryFoldersNavBtn" type="button">
+          <span class="home-navigation-copy">
+            <strong data-i18n="categoryFolders">分类文件夹</strong>
+            <small id="categoryEntrySummary">0 个分类</small>
+          </span>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m7.5 4.5 5 5-5 5"></path>
+          </svg>
+        </button>
+      </nav>
+    </main>
+
+    <section id="favoritesView" class="panel-view favorites-view hidden" aria-labelledby="favoritesViewTitle">
+      <div class="view-intro">
+        <h1 id="favoritesViewTitle" data-i18n="myFavorites">我的收藏</h1>
+        <p id="favoritesViewSummary">0 条收藏 · 0 个分类</p>
+      </div>
+
+      <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
+        <div class="section-heading">
+          <h2 id="recentTitle" data-i18n="recentFavorites">最近收藏</h2>
+          <button class="link-button" id="viewAllBtn" type="button" data-i18n="viewAll">查看全部</button>
         </div>
-        <button class="library-toggle" id="libraryToggleBtn" type="button" aria-expanded="false" aria-controls="libraryPanel" data-i18n="expand">展开</button>
+        <div class="recent-list" id="recentList"></div>
       </section>
 
-      <div id="libraryPanel" class="library-panel hidden">
-        <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
-          <div class="section-heading">
-            <h2 id="recentTitle" data-i18n="recentFavorites">最近收藏</h2>
-            <button class="link-button" id="viewAllBtn" type="button" data-i18n="viewAll">查看全部</button>
-          </div>
-          <div class="recent-list" id="recentList"></div>
-        </section>
+      <section class="content-section folders-section" id="foldersSection" aria-labelledby="foldersTitle">
+        <div class="section-heading" id="foldersHeading">
+          <h2 id="foldersTitle" data-i18n="favoriteCategories">收藏分类</h2>
+          <span id="totalCount" class="total-count">0 条</span>
+        </div>
+        <div class="folders-list" id="foldersList"></div>
+      </section>
+    </section>
 
-        <section class="content-section folders-section" aria-labelledby="foldersTitle">
-          <div class="section-heading">
-            <h2 id="foldersTitle" data-i18n="favoriteCategories">收藏分类</h2>
-            <span id="totalCount" class="total-count">0 条</span>
-          </div>
-          <div class="folders-list" id="foldersList"></div>
-        </section>
+    <section id="categoriesView" class="panel-view categories-view hidden" aria-labelledby="categoryManagerTitle">
+      <div class="view-intro">
+        <h1 id="categoryManagerTitle" data-i18n="categoryFolders">分类文件夹</h1>
+        <p data-i18n="categoryReclassifyHint">保存规则后，会重新检查全部已有收藏并更新分类。</p>
       </div>
-    </main>
+
+      <div class="category-manager">
+        <div class="category-add-row">
+          <input
+            id="compactNewCategory"
+            type="text"
+            autocomplete="off"
+            data-i18n-placeholder="newCategoryPlaceholder"
+            data-i18n-aria-label="newCategoryPlaceholder"
+            placeholder="输入新文件夹名称"
+          >
+          <button id="compactAddCategoryBtn" type="button" data-i18n="addCategory">添加</button>
+        </div>
+        <div id="categoryRulesList" class="category-rules-list"></div>
+      </div>
+
+      <div id="categorySettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
+      <button class="button button-primary category-save" id="categorySaveBtn" type="button" data-i18n="saveAndReclassify">保存并重新分类</button>
+    </section>
 
     <section id="settingsView" class="settings-view hidden" aria-labelledby="compactSettingsTitle">
       <div class="settings-intro">
@@ -189,34 +232,15 @@
         <p class="compact-note" data-i18n="browserFolderNote">整理只移动网址收藏，不删除内容；SmartFav 文件夹内的记录不会重复处理。</p>
       </div>
 
-      <section class="category-manager" aria-labelledby="categoryManagerTitle">
-        <div class="category-manager-heading">
-          <h2 id="categoryManagerTitle" data-i18n="categoryFolders">分类文件夹</h2>
-          <p data-i18n="categoryFoldersHint">添加文件夹，并为每个文件夹设置匹配关键词。</p>
-        </div>
-        <div class="category-add-row">
-          <input
-            id="compactNewCategory"
-            type="text"
-            autocomplete="off"
-            data-i18n-placeholder="newCategoryPlaceholder"
-            data-i18n-aria-label="newCategoryPlaceholder"
-            placeholder="输入新文件夹名称"
-          >
-          <button id="compactAddCategoryBtn" type="button" data-i18n="addCategory">添加</button>
-        </div>
-        <div id="categoryRulesList" class="category-rules-list"></div>
-      </section>
-
       <div id="compactSettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
       <button class="button button-primary compact-save" id="compactSaveBtn" type="button" data-i18n="saveSettings">保存设置</button>
     </section>
   </div>
 
-  <script src="i18n.js?v=1.6.7"></script>
-  <script src="classifier.js?v=1.6.7"></script>
-  <script src="browser-bookmarks.js?v=1.6.7"></script>
-  <script src="ai-client.js?v=1.6.7"></script>
-  <script src="popup.js?v=1.6.7"></script>
+  <script src="i18n.js?v=1.7.0-r2"></script>
+  <script src="classifier.js?v=1.7.0-r2"></script>
+  <script src="browser-bookmarks.js?v=1.7.0-r2"></script>
+  <script src="ai-client.js?v=1.7.0-r2"></script>
+  <script src="popup.js?v=1.7.0-r2"></script>
 </body>
 </html>
