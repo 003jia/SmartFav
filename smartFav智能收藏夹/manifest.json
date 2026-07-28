@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extensionName__",
-  "version": "1.8.0",
+  "version": "1.12.0",
   "description": "__MSG_extensionDescription__",
   "default_locale": "zh_CN",
   "permissions": [
@@ -9,7 +9,8 @@
     "activeTab",
     "scripting",
     "bookmarks",
-    "alarms"
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "http://localhost:11434/*",
@@ -17,6 +18,11 @@
     "https://api.minimaxi.com/*",
     "https://api.deepseek.com/*",
     "https://api.openai.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "icons": {
     "16": "icons/icon16.png",

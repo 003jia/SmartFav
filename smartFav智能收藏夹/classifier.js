@@ -53,6 +53,13 @@
       .trim();
   }
 
+  function splitKeywords(value) {
+    return [...new Set(String(value || '')
+      .split(/[,，;；\r\n]+/)
+      .map((keyword) => keyword.trim())
+      .filter(Boolean))];
+  }
+
   function mergeRules(categories, customRules, language = 'zh_CN') {
     const defaults = getDefaults(language).keywordRules;
     return categories.reduce((result, category) => {
@@ -274,10 +281,7 @@
       if (separator < 1) return;
       const category = line.slice(0, separator).trim();
       if (!categories.includes(category)) return;
-      result[category] = line.slice(separator + 1)
-        .split(/[,，]/)
-        .map((keyword) => keyword.trim())
-        .filter(Boolean);
+      result[category] = splitKeywords(line.slice(separator + 1));
     });
     return mergeRules(categories, result, language);
   }
@@ -294,6 +298,7 @@
     mergeRules,
     normalizeWeights,
     tokenizeVectorText,
+    splitKeywords,
     rulesToText,
     textToRules
   };

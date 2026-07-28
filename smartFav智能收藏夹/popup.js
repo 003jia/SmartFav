@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS = {
   classificationMode: 'weighted',
   classificationWeights: SmartFavClassifier.DEFAULT_WEIGHTS,
   apiProvider: 'ollama',
+  apiEndpoint: '',
   apiKey: '',
   model: 'qwen2.5:3b',
   browserBookmarksEnabled: false,
@@ -26,10 +27,27 @@ const DEFAULT_SETTINGS = {
 
 const THEME_STYLES = ['glass', 'white', 'gray', 'black', 'parchment'];
 const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const BROWSER_ACTIVITY_TTL_MS = 5 * 60 * 1000;
 const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.storage && chrome.tabs);
 const previewState = {
   settings: DEFAULT_SETTINGS,
+  favoriteOrder: {},
   recentlyDeleted: [],
+  bookmarkRestorePoints: [
+    {
+      id: 'preview-restore-point',
+      schemaVersion: 1,
+      createdAt: Date.now() - 12 * 60 * 1000,
+      updatedAt: Date.now() - 4 * 60 * 1000,
+      reason: 'organize',
+      bookmarkCount: 4,
+      folderCount: 3,
+      legacyManagedCount: 0,
+      preservedManagedFolderIds: [],
+      bookmarks: []
+    }
+  ],
+  pendingBrowserActivity: null,
   favorites: [
     {
       title: 'GitHub · Build and ship software',
@@ -61,6 +79,92 @@ const previewState = {
     }
   ]
 };
+if (!isExtension) {
+  const previewParams = new URLSearchParams(window.location.search);
+  const previewRestoreState = previewParams.get('restoreState');
+  if (previewParams.get('preview') === 'reorder') {
+    const customCategory = detectedLanguage === 'zh_CN' ? '项目资料' : 'Projects';
+    previewState.settings = {
+      ...DEFAULT_SETTINGS,
+      categories: [...DEFAULT_SETTINGS.categories, customCategory],
+      keywordRules: {
+        ...DEFAULT_SETTINGS.keywordRules,
+        [customCategory]: ['项目', '管理', '流程', '文档']
+      }
+    };
+    previewState.favorites = [
+      {
+        title: detectedLanguage === 'zh_CN'
+          ? 'Comate 客户管理表'
+          : 'Comate customer dashboard',
+        url: 'https://ku.baidu-int.com/customer',
+        category: customCategory,
+        createdAt: Date.now() - 5 * 60000
+      },
+      {
+        title: detectedLanguage === 'zh_CN'
+          ? 'Comate 智能云下单流程'
+          : 'Comate cloud ordering workflow',
+        url: 'https://ku.baidu-int.com/order',
+        category: customCategory,
+        createdAt: Date.now() - 10 * 60000
+      },
+      {
+        title: 'comate.baidu.com/zh/management/home',
+        url: 'https://comate.baidu.com/zh/management/home',
+        category: customCategory,
+        createdAt: Date.now() - 15 * 60000
+      },
+      {
+        title: detectedLanguage === 'zh_CN'
+          ? 'Comate 海外模型单价'
+          : 'Comate international model pricing',
+        url: 'https://comate.baidu.com/pricing',
+        category: customCategory,
+        createdAt: Date.now() - 20 * 60000
+      },
+      {
+        title: detectedLanguage === 'zh_CN'
+          ? 'Comate 试用客户跟进'
+          : 'Comate trial customer follow-up',
+        url: 'https://ku.baidu-int.com/follow-up',
+        category: customCategory,
+        createdAt: Date.now() - 25 * 60000
+      },
+      ...previewState.favorites
+    ];
+  }
+  if (previewRestoreState === 'legacy') {
+    previewState.bookmarkRestorePoints = [
+      {
+        id: 'preview-legacy-only',
+        schemaVersion: 1,
+        createdAt: Date.now() - 12 * 60 * 1000,
+        updatedAt: Date.now() - 4 * 60 * 1000,
+        reason: 'manual',
+        bookmarkCount: 0,
+        folderCount: 0,
+        legacyManagedCount: 36,
+        preservedManagedFolderIds: [],
+        bookmarks: []
+      }
+    ];
+  } else if (previewRestoreState === 'empty') {
+    previewState.bookmarkRestorePoints = [];
+  }
+}
+if (!isExtension && new URLSearchParams(window.location.search).get('activity') === 'classified') {
+  previewState.pendingBrowserActivity = {
+    id: 'preview-classified',
+    type: 'classified',
+    title: 'GitHub · Build and ship software',
+    url: 'https://github.com/',
+    category: detectedLanguage === 'zh_CN' ? '编程' : 'Programming',
+    count: 1,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + BROWSER_ACTIVITY_TTL_MS
+  };
+}
 
 const elements = {
   modeBtn: document.getElementById('modeBtn'),
@@ -102,6 +206,7 @@ const elements = {
   totalCount: document.getElementById('totalCount'),
   librarySummary: document.getElementById('librarySummary'),
   favoritesViewSummary: document.getElementById('favoritesViewSummary'),
+  favoritesReorderStatus: document.getElementById('favoritesReorderStatus'),
   categoryEntrySummary: document.getElementById('categoryEntrySummary'),
   favoritesNavBtn: document.getElementById('favoritesNavBtn'),
   categoryFoldersNavBtn: document.getElementById('categoryFoldersNavBtn'),
@@ -120,6 +225,8 @@ const elements = {
   compactAiEnabled: document.getElementById('compactAiEnabled'),
   compactAiFields: document.getElementById('compactAiFields'),
   compactProvider: document.getElementById('compactProvider'),
+  compactApiEndpoint: document.getElementById('compactApiEndpoint'),
+  compactApiEndpointField: document.getElementById('compactApiEndpointField'),
   compactModel: document.getElementById('compactModel'),
   compactApiKey: document.getElementById('compactApiKey'),
   compactApiKeyField: document.getElementById('compactApiKeyField'),
@@ -134,14 +241,21 @@ const elements = {
   compactBookmarkOrganizeEnabled: document.getElementById('compactBookmarkOrganizeEnabled'),
   compactBookmarkAutoCapture: document.getElementById('compactBookmarkAutoCapture'),
   compactOrganizeBtn: document.getElementById('compactOrganizeBtn'),
+  bookmarkBackupBadge: document.getElementById('bookmarkBackupBadge'),
+  bookmarkBackupSummary: document.getElementById('bookmarkBackupSummary'),
+  bookmarkBackupCreateBtn: document.getElementById('bookmarkBackupCreateBtn'),
+  bookmarkBackupPreviewBtn: document.getElementById('bookmarkBackupPreviewBtn'),
+  bookmarkBackupRestoreBtn: document.getElementById('bookmarkBackupRestoreBtn'),
+  bookmarkBackupExportBtn: document.getElementById('bookmarkBackupExportBtn'),
+  bookmarkBackupImportInput: document.getElementById('bookmarkBackupImportInput'),
+  bookmarkBackupStatus: document.getElementById('bookmarkBackupStatus'),
   compactNewCategory: document.getElementById('compactNewCategory'),
   compactAddCategoryBtn: document.getElementById('compactAddCategoryBtn'),
   categoryRulesList: document.getElementById('categoryRulesList'),
   categorySettingsStatus: document.getElementById('categorySettingsStatus'),
   categorySaveBtn: document.getElementById('categorySaveBtn'),
   compactTestBtn: document.getElementById('compactTestBtn'),
-  compactSettingsStatus: document.getElementById('compactSettingsStatus'),
-  compactSaveBtn: document.getElementById('compactSaveBtn')
+  compactSettingsStatus: document.getElementById('compactSettingsStatus')
 };
 
 let currentTabInfo = null;
@@ -152,7 +266,14 @@ let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
 let pendingBackgroundImage = DEFAULT_SETTINGS.customBackgroundImage;
 let showingAllFavorites = false;
 let activeView = 'home';
+let activeFavoriteCategory = null;
+let activeFavoriteOrder = {};
+let favoriteOpenSuppressUntil = 0;
 let aiEnhanceInFlight = false;
+let lastShownBrowserActivityId = '';
+let currentBrowserActivity = null;
+let currentBookmarkRestorePoint = null;
+let settingsSaveQueue = Promise.resolve();
 
 document.addEventListener('DOMContentLoaded', async () => {
   await recoverManagedBrowserFavorites();
@@ -165,6 +286,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await showView(['favorites', 'categories', 'trash', 'settings'].includes(requestedView)
     ? requestedView
     : 'home');
+  await showPendingBrowserActivity();
 });
 
 function t(key, variables) {
@@ -185,12 +307,146 @@ function storageSet(values) {
     Object.assign(previewState, values);
     return Promise.resolve();
   }
-  return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(values, () => {
+      const runtimeError = chrome.runtime && chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function summarizePreviewRestorePoint(point) {
+  if (!point) return null;
+  return {
+    id: point.id,
+    createdAt: Number(point.createdAt) || 0,
+    updatedAt: Number(point.updatedAt || point.createdAt) || 0,
+    restoredAt: Number(point.restoredAt) || 0,
+    reason: point.reason || 'manual',
+    bookmarkCount: Number(point.bookmarkCount)
+      || (Array.isArray(point.bookmarks) ? point.bookmarks.length : 0),
+    folderCount: Number(point.folderCount) || 0,
+    legacyManagedCount: Number(point.legacyManagedCount) || 0
+  };
+}
+
+function handlePreviewRuntimeMessage(type, payload = {}) {
+  const points = Array.isArray(previewState.bookmarkRestorePoints)
+    ? previewState.bookmarkRestorePoints
+    : [];
+  const active = [...points]
+    .filter((point) => !point.restoredAt)
+    .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))[0]
+    || null;
+  const selected = points.find((point) => point.id === payload.pointId)
+    || active
+    || points[0]
+    || null;
+
+  if (type === 'getBookmarkRestorePoints') {
+    return {
+      status: 'ok',
+      points: [...points]
+        .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))
+        .map(summarizePreviewRestorePoint),
+      activePoint: summarizePreviewRestorePoint(active)
+    };
+  }
+  if (type === 'createBookmarkRestorePoint') {
+    const point = active || {
+      id: `preview-restore-${Date.now()}`,
+      schemaVersion: 1,
+      createdAt: Date.now(),
+      reason: 'manual',
+      preservedManagedFolderIds: [],
+      bookmarks: []
+    };
+    point.updatedAt = Date.now();
+    point.bookmarkCount = Math.max(point.bookmarkCount || 0, previewState.favorites.length);
+    point.folderCount = Math.max(point.folderCount || 0, 3);
+    if (!active) previewState.bookmarkRestorePoints = [point, ...points].slice(0, 3);
+    return { status: 'ok', point: summarizePreviewRestorePoint(point) };
+  }
+  if (type === 'previewBookmarkRestore') {
+    if (!selected) return { status: 'missing' };
+    return {
+      status: 'ok',
+      point: summarizePreviewRestorePoint(selected),
+      movable: Math.max(0, Number(selected.bookmarkCount) - 1),
+      alreadyRestored: selected.bookmarkCount ? 1 : 0,
+      missingBookmarks: 0,
+      foldersToRecreate: 1,
+      legacyManagedCount: Number(selected.legacyManagedCount) || 0
+    };
+  }
+  if (type === 'restoreBookmarkLayout') {
+    if (!selected) return { status: 'missing' };
+    selected.restoredAt = Date.now();
+    return {
+      status: 'ok',
+      restored: Math.max(0, Number(selected.bookmarkCount) - 1),
+      alreadyRestored: selected.bookmarkCount ? 1 : 0,
+      missingBookmarks: 0,
+      unresolvedParents: 0,
+      createdFolders: 1,
+      removedEmptyFolders: 2,
+      errors: [],
+      point: summarizePreviewRestorePoint(selected)
+    };
+  }
+  if (type === 'exportBookmarkRestorePoints') {
+    return {
+      status: 'ok',
+      payload: {
+        format: 'smartfav-bookmark-restore',
+        schemaVersion: 1,
+        exportedAt: Date.now(),
+        restorePoints: points
+      }
+    };
+  }
+  if (type === 'importBookmarkRestorePoints') {
+    const imported = payload.payload;
+    if (
+      !imported
+      || imported.format !== 'smartfav-bookmark-restore'
+      || !Array.isArray(imported.restorePoints)
+      || !imported.restorePoints.length
+    ) {
+      return { status: 'error', message: 'Invalid SmartFav restore file' };
+    }
+    previewState.bookmarkRestorePoints = imported.restorePoints.slice(-3);
+    return {
+      status: 'ok',
+      imported: previewState.bookmarkRestorePoints.length
+    };
+  }
+  if (type === 'syncManagedOrder') {
+    const order = payload.order || {};
+    const matched = Array.isArray(order.categories)
+      ? order.categories.length
+      : Array.isArray(order.orderedUrls)
+        ? order.orderedUrls.length
+        : 0;
+    return {
+      status: 'ok',
+      moved: matched,
+      matched,
+      missing: 0,
+      categoryFoldersMoved: Array.isArray(order.categories) ? matched : 0,
+      favoritesMoved: Array.isArray(order.orderedUrls) ? matched : 0
+    };
+  }
+  return { status: 'unavailable' };
 }
 
 function sendRuntimeMessage(type, payload = {}) {
   if (!isExtension || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') {
-    return Promise.resolve({ status: 'unavailable' });
+    return Promise.resolve(handlePreviewRuntimeMessage(type, payload));
   }
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type, ...payload }, (response) => {
@@ -199,6 +455,93 @@ function sendRuntimeMessage(type, payload = {}) {
         ? { status: 'error', message: runtimeError.message }
         : response);
     });
+  });
+}
+
+function getBrowserActivityMessage(activity) {
+  if (activity.type === 'classified') {
+    return t('browserClassifiedActivity', {
+      title: activity.title || activity.url || t('untitledPage'),
+      category: activity.category || t('otherCategory')
+    });
+  }
+  if (activity.type === 'trashed' && Number(activity.count) > 1) {
+    return t('browserTrashedManyActivity', { count: activity.count });
+  }
+  if (activity.type === 'trashed') {
+    return t('browserTrashedActivity', {
+      title: activity.title || activity.url || t('untitledPage')
+    });
+  }
+  return '';
+}
+
+async function showBrowserActivity(activity) {
+  if (!activity || !activity.id || activity.id === lastShownBrowserActivityId) return false;
+  const createdAt = Number(activity.createdAt) || 0;
+  const expiresAt = Number(activity.expiresAt) || createdAt + BROWSER_ACTIVITY_TTL_MS;
+  if (!createdAt || expiresAt <= Date.now()) {
+    await storageSet({ pendingBrowserActivity: null });
+    return false;
+  }
+  const message = getBrowserActivityMessage(activity);
+  if (!message) return false;
+  lastShownBrowserActivityId = activity.id;
+  currentBrowserActivity = activity;
+  elements.successMsg.textContent = message;
+  elements.successStatus.classList.remove('hidden');
+  await storageSet({ pendingBrowserActivity: null });
+  return true;
+}
+
+async function showPendingBrowserActivity() {
+  const result = await storageGet(['pendingBrowserActivity']);
+  return showBrowserActivity(result.pendingBrowserActivity);
+}
+
+if (
+  isExtension
+  && chrome.storage.onChanged
+  && typeof chrome.storage.onChanged.addListener === 'function'
+) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.pendingBrowserActivity && changes.pendingBrowserActivity.newValue) {
+      showBrowserActivity(changes.pendingBrowserActivity.newValue).catch((error) => {
+        console.error('SmartFav activity display failed:', error);
+      });
+    }
+    if (changes.favorites || changes.recentlyDeleted) {
+      const categoryToKeep = activeView === 'favorites' ? activeFavoriteCategory : null;
+      Promise.all([
+        renderFolders(),
+        renderRecentFavorites(),
+        renderRecentlyDeleted()
+      ])
+        .then(async () => {
+          if (!categoryToKeep) return;
+          const result = await storageGet(['favorites', 'favoriteOrder']);
+          const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+          showFavoritesByCategory(categoryToKeep, favorites, result.favoriteOrder);
+        })
+        .catch((error) => {
+          console.error('SmartFav live refresh failed:', error);
+        });
+    } else if (
+      changes.favoriteOrder
+      && activeView === 'favorites'
+      && activeFavoriteCategory
+    ) {
+      const categoryToKeep = activeFavoriteCategory;
+      storageGet(['favorites', 'favoriteOrder'])
+        .then((result) => {
+          const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+          showFavoritesByCategory(categoryToKeep, favorites, result.favoriteOrder);
+        })
+        .catch((error) => {
+          console.error('SmartFav order refresh failed:', error);
+        });
+    }
   });
 }
 
@@ -219,6 +562,9 @@ async function loadSettings() {
   const saved = result.settings || {};
   const language = SmartFavI18n.normalizeLanguage(saved.language || detectedLanguage);
   const localizedDefaults = SmartFavClassifier.getDefaults(language);
+  const apiProvider = SmartFavAI.PROVIDERS[saved.apiProvider]
+    ? saved.apiProvider
+    : DEFAULT_SETTINGS.apiProvider;
   const categories = Array.isArray(saved.categories) && saved.categories.length
     ? saved.categories
     : localizedDefaults.categories;
@@ -238,6 +584,8 @@ async function loadSettings() {
     aiCreateCategories: Boolean(saved.aiCreateCategories),
     classificationMode: saved.classificationMode === 'vector' ? 'vector' : 'weighted',
     classificationWeights: SmartFavClassifier.normalizeWeights(saved.classificationWeights),
+    apiProvider,
+    apiEndpoint: typeof saved.apiEndpoint === 'string' ? saved.apiEndpoint : '',
     browserBookmarksEnabled: Boolean(saved.browserBookmarksEnabled),
     bookmarkWriteMode: saved.bookmarkWriteMode === 'add' ? 'add' : 'overwrite',
     bookmarkOrganizeEnabled: Boolean(saved.bookmarkOrganizeEnabled),
@@ -256,6 +604,8 @@ async function loadSettings() {
     || typeof saved.aiCreateCategories !== 'boolean'
     || !['weighted', 'vector'].includes(saved.classificationMode)
     || !saved.classificationWeights
+    || !SmartFavAI.PROVIDERS[saved.apiProvider]
+    || typeof saved.apiEndpoint !== 'string'
     || typeof saved.browserBookmarksEnabled !== 'boolean'
     || typeof saved.bookmarkOrganizeEnabled !== 'boolean'
     || typeof saved.bookmarkAutoCaptureEnabled !== 'boolean'
@@ -314,6 +664,9 @@ function applyAppearance(settings = currentSettings) {
 
 function applyLanguage() {
   SmartFavI18n.applyToDocument(currentSettings.language, document);
+  if (currentBrowserActivity) {
+    elements.successMsg.textContent = getBrowserActivityMessage(currentBrowserActivity);
+  }
   elements.languageBtn.textContent = currentSettings.language === 'zh_CN' ? 'EN' : '中';
   elements.languageBtn.setAttribute('aria-label', t('switchToEnglish'));
   const isHome = activeView === 'home';
@@ -349,7 +702,17 @@ async function switchLanguage() {
   const previousLanguage = currentSettings.language;
   const nextLanguage = previousLanguage === 'zh_CN' ? 'en' : 'zh_CN';
   const shouldMigrateDefaults = isUsingDefaultClassification(currentSettings, previousLanguage);
+  const previousDefaults = SmartFavClassifier.getDefaults(previousLanguage);
   const nextDefaults = SmartFavClassifier.getDefaults(nextLanguage);
+  if (currentBrowserActivity && shouldMigrateDefaults) {
+    const categoryIndex = previousDefaults.categories.indexOf(currentBrowserActivity.category);
+    if (categoryIndex >= 0 && nextDefaults.categories[categoryIndex]) {
+      currentBrowserActivity = {
+        ...currentBrowserActivity,
+        category: nextDefaults.categories[categoryIndex]
+      };
+    }
+  }
   currentSettings = {
     ...currentSettings,
     language: nextLanguage,
@@ -437,7 +800,7 @@ function getPageContent(tabId) {
         const metaKeywords = document.querySelector('meta[name="keywords"]')?.content || '';
         const bodyText = document.body?.innerText?.slice(0, 1200) || '';
         const keywords = metaKeywords
-          .split(/[,，]/)
+          .split(/[,，;；\r\n]+/)
           .map((keyword) => keyword.trim())
           .filter(Boolean)
           .slice(0, 24);
@@ -650,11 +1013,13 @@ elements.confirmBtn.addEventListener('click', async () => {
 });
 
 async function renderFolders() {
-  const result = await storageGet(['favorites', 'settings']);
+  activeFavoriteCategory = null;
+  const result = await storageGet(['favorites', 'settings', 'favoriteOrder']);
   const favorites = Array.isArray(result.favorites) ? result.favorites : [];
   const categories = result.settings && Array.isArray(result.settings.categories) && result.settings.categories.length
     ? result.settings.categories
     : currentSettings.categories;
+  activeFavoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
   const counts = Object.fromEntries(categories.map((category) => [category, 0]));
   favorites.forEach((favorite) => {
     if (Object.prototype.hasOwnProperty.call(counts, favorite.category)) counts[favorite.category] += 1;
@@ -671,13 +1036,205 @@ async function renderFolders() {
   elements.foldersHeading.classList.remove('hidden');
   elements.foldersList.classList.remove('list-view');
   elements.foldersList.innerHTML = categories.map((category) => `
-    <button class="folder-item" type="button" data-category="${escapeHtml(category)}">
+    <button
+      class="folder-item"
+      type="button"
+      draggable="true"
+      data-category="${escapeHtml(category)}"
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+      title="${escapeHtml(t('dragFolderHint'))}"
+    >
+      <span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>
       <span class="folder-name">${escapeHtml(category)}</span>
       <span class="folder-count">${counts[category] || 0}</span>
     </button>
   `).join('');
-  elements.foldersList.querySelectorAll('.folder-item').forEach((item) => {
-    item.addEventListener('click', () => showFavoritesByCategory(item.dataset.category, favorites));
+  bindFolderInteractions(categories, favorites);
+}
+
+function normalizeFavoriteOrderMap(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function announceFavoriteReorder(message) {
+  if (!elements.favoritesReorderStatus) return;
+  elements.favoritesReorderStatus.textContent = '';
+  requestAnimationFrame(() => {
+    elements.favoritesReorderStatus.textContent = message;
+  });
+}
+
+function showFavoriteReorderError(error) {
+  const message = t('reorderFailed', {
+    message: error && error.message ? error.message : String(error || '')
+  });
+  announceFavoriteReorder(message);
+  elements.errorMsg.textContent = message;
+  elements.errorStatus.classList.remove('hidden');
+}
+
+async function finishFavoriteReorder(message, order) {
+  elements.errorStatus.classList.add('hidden');
+  if (!currentSettings.browserBookmarksEnabled) {
+    announceFavoriteReorder(message);
+    return;
+  }
+
+  try {
+    const response = await sendRuntimeMessage('syncManagedOrder', { order });
+    if (
+      !response
+      || response.status === 'error'
+      || response.status === 'unavailable'
+      || response.status === 'invalid'
+    ) {
+      throw new Error(
+        response && response.message
+          ? response.message
+          : t('browserBookmarkUnavailable')
+      );
+    }
+    if (response.status === 'disabled') {
+      announceFavoriteReorder(message);
+      return;
+    }
+    if (response.status === 'missing' || (!response.matched && response.missing)) {
+      announceFavoriteReorder(t('orderBrowserTargetMissing', { message }));
+      return;
+    }
+    if (response.missing > 0) {
+      announceFavoriteReorder(t('orderPartiallySyncedToBrowser', {
+        message,
+        count: response.missing
+      }));
+      return;
+    }
+    announceFavoriteReorder(t('orderSyncedToBrowser', { message }));
+  } catch (error) {
+    const syncError = t('orderBrowserSyncFailed', {
+      message: error && error.message ? error.message : String(error || '')
+    });
+    announceFavoriteReorder(syncError);
+    elements.errorMsg.textContent = syncError;
+    elements.errorStatus.classList.remove('hidden');
+  }
+}
+
+function clearReorderMarkers(container) {
+  container.querySelectorAll('.is-drop-before, .is-drop-after, .is-dragging')
+    .forEach((item) => {
+      item.classList.remove('is-drop-before', 'is-drop-after', 'is-dragging');
+    });
+}
+
+function markReorderTarget(container, target, placement) {
+  container.querySelectorAll('.is-drop-before, .is-drop-after').forEach((item) => {
+    item.classList.remove('is-drop-before', 'is-drop-after');
+  });
+  target.classList.add(placement === 'after' ? 'is-drop-after' : 'is-drop-before');
+}
+
+function getDropPlacement(event, target, layout = 'vertical') {
+  const rect = target.getBoundingClientRect();
+  const middleX = rect.left + rect.width / 2;
+  const middleY = rect.top + rect.height / 2;
+  if (layout === 'grid' && Math.abs(event.clientY - middleY) < rect.height * 0.3) {
+    return event.clientX >= middleX ? 'after' : 'before';
+  }
+  return event.clientY >= middleY ? 'after' : 'before';
+}
+
+function focusReorderedItem(container, selector, dataKey, value) {
+  const item = Array.from(container.querySelectorAll(selector))
+    .find((candidate) => candidate.dataset[dataKey] === value);
+  if (item) item.focus();
+}
+
+async function persistCategoryOrder(nextCategories, movedCategory) {
+  if (
+    !Array.isArray(nextCategories)
+    || nextCategories.join('\u0000') === currentSettings.categories.join('\u0000')
+  ) {
+    return;
+  }
+  currentSettings = {
+    ...currentSettings,
+    categories: nextCategories
+  };
+  await storageSet({ settings: currentSettings });
+  await renderFolders();
+  focusReorderedItem(elements.foldersList, '.folder-item', 'category', movedCategory);
+  const message = t('categoryOrderUpdated', {
+    category: movedCategory,
+    position: nextCategories.indexOf(movedCategory) + 1
+  });
+  await finishFavoriteReorder(message, { categories: nextCategories });
+}
+
+function bindFolderInteractions(categories, favorites) {
+  let draggedCategory = '';
+  let suppressClick = false;
+  const items = Array.from(elements.foldersList.querySelectorAll('.folder-item'));
+
+  items.forEach((item) => {
+    item.addEventListener('click', (event) => {
+      if (suppressClick) {
+        event.preventDefault();
+        return;
+      }
+      showFavoritesByCategory(item.dataset.category, favorites, activeFavoriteOrder);
+    });
+
+    item.addEventListener('keydown', (event) => {
+      if (!event.altKey || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      const offset = ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1;
+      const nextCategories = SmartFavOrder.moveValue(categories, item.dataset.category, offset);
+      persistCategoryOrder(nextCategories, item.dataset.category).catch(showFavoriteReorderError);
+    });
+
+    item.addEventListener('dragstart', (event) => {
+      draggedCategory = item.dataset.category;
+      suppressClick = true;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('application/x-smartfav-category', draggedCategory);
+      event.dataTransfer.setData('text/plain', draggedCategory);
+      requestAnimationFrame(() => item.classList.add('is-dragging'));
+    });
+
+    item.addEventListener('dragover', (event) => {
+      if (!draggedCategory || draggedCategory === item.dataset.category) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      markReorderTarget(
+        elements.foldersList,
+        item,
+        getDropPlacement(event, item, 'grid')
+      );
+    });
+
+    item.addEventListener('drop', (event) => {
+      if (!draggedCategory || draggedCategory === item.dataset.category) return;
+      event.preventDefault();
+      const placement = getDropPlacement(event, item, 'grid');
+      const nextCategories = SmartFavOrder.reorderValues(
+        categories,
+        draggedCategory,
+        item.dataset.category,
+        placement
+      );
+      const movedCategory = draggedCategory;
+      clearReorderMarkers(elements.foldersList);
+      persistCategoryOrder(nextCategories, movedCategory).catch(showFavoriteReorderError);
+    });
+
+    item.addEventListener('dragend', () => {
+      draggedCategory = '';
+      clearReorderMarkers(elements.foldersList);
+      setTimeout(() => { suppressClick = false; }, 0);
+    });
   });
 }
 
@@ -693,7 +1250,9 @@ async function renderRecentFavorites() {
     elements.recentList.innerHTML = `<div class="empty-state">${escapeHtml(t('emptyFavorites'))}</div>`;
     return;
   }
-  elements.recentList.innerHTML = visibleFavorites.map(renderFavoriteRow).join('');
+  elements.recentList.innerHTML = visibleFavorites
+    .map((favorite) => renderFavoriteRow(favorite))
+    .join('');
   bindFavoriteActions(elements.recentList);
 }
 
@@ -842,48 +1401,88 @@ async function permanentlyDeleteRecentlyDeleted(trashId) {
   }
 }
 
-function showFavoritesByCategory(category, favorites) {
+function showFavoritesByCategory(category, favorites, favoriteOrder = activeFavoriteOrder) {
+  activeFavoriteCategory = category;
+  activeFavoriteOrder = normalizeFavoriteOrderMap(favoriteOrder);
   elements.recentSection.classList.add('hidden');
   elements.foldersHeading.classList.add('hidden');
-  renderFavoriteList(category, favorites.filter((favorite) => favorite.category === category));
+  renderFavoriteList(category, favorites, activeFavoriteOrder);
 }
 
-function renderFavoriteList(title, favorites) {
+function renderFavoriteList(title, favorites, favoriteOrder = activeFavoriteOrder) {
+  const orderedFavorites = SmartFavOrder.applyFavoriteOrder(
+    favorites,
+    title,
+    favoriteOrder[title]
+  );
   elements.foldersList.classList.add('list-view');
   elements.foldersList.innerHTML = `
     <div class="category-header">
       <button class="back-button" id="backToFolders" type="button">${escapeHtml(t('backToCategories'))}</button>
-      <span class="category-title">${escapeHtml(title)} · ${favorites.length}</span>
+      <div class="category-heading">
+        <span class="category-title">${escapeHtml(title)}</span>
+        <span class="category-count">${escapeHtml(t('favoritesCount', { count: orderedFavorites.length }))}</span>
+      </div>
     </div>
-    ${favorites.length
-      ? favorites.map(renderFavoriteRow).join('')
-      : `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`}
+    <div class="favorite-list-rows">
+      ${orderedFavorites.length
+        ? orderedFavorites.map((favorite) => renderFavoriteRow(favorite, {
+          showCategory: false,
+          inFolder: true
+        })).join('')
+        : `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`}
+    </div>
   `;
   document.getElementById('backToFolders').addEventListener('click', renderFolders);
   bindFavoriteActions(elements.foldersList);
+  bindFavoriteReordering(elements.foldersList, title);
 }
 
-function renderFavoriteRow(favorite) {
+function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } = {}) {
   const image = favorite.favicon
     ? `<img src="${escapeHtml(favorite.favicon)}" class="favicon" alt="">`
     : '';
   const title = favorite.title || t('untitledPage');
+  const hostname = getHostname(favorite.url);
+  const category = favorite.category || t('otherCategory');
+  const metadata = showCategory ? `${category} · ${hostname}` : hostname;
+  const reorderAttributes = inFolder
+    ? `
+      draggable="true"
+      data-favorite-url="${escapeHtml(favorite.url)}"
+      data-category="${escapeHtml(category)}"
+      title="${escapeHtml(t('dragFavoriteHint'))}"`
+    : '';
+  const keyboardAttributes = inFolder
+    ? 'aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"'
+    : '';
   return `
-    <div class="favorite-row">
-      <button class="recent-item favorite-link" type="button" data-url="${escapeHtml(favorite.url)}">
+    <article
+      class="favorite-row favorite-row-card${inFolder ? ' favorite-row-in-folder' : ''}"
+      ${reorderAttributes}
+    >
+      ${inFolder ? '<span class="reorder-grip favorite-reorder-grip" aria-hidden="true"></span>' : ''}
+      <button
+        class="recent-item favorite-link"
+        type="button"
+        data-url="${escapeHtml(favorite.url)}"
+        title="${escapeHtml(`${title} · ${hostname}`)}"
+        ${keyboardAttributes}
+      >
         ${image}
         <span class="recent-info">
           <span class="recent-title">${escapeHtml(title)}</span>
-          <span class="recent-category">${escapeHtml(favorite.category || t('otherCategory'))}</span>
+          <span class="recent-category">${escapeHtml(metadata)}</span>
         </span>
       </button>
       <button
         class="favorite-delete-button"
         type="button"
+        draggable="false"
         data-url="${escapeHtml(favorite.url)}"
         aria-label="${escapeHtml(t('deleteFavorite', { title }))}"
       >${escapeHtml(t('deleteShort'))}</button>
-    </div>
+    </article>
   `;
 }
 
@@ -892,7 +1491,10 @@ function bindFavoriteActions(container) {
     image.addEventListener('error', () => image.remove(), { once: true });
   });
   container.querySelectorAll('.favorite-link').forEach((item) => {
-    item.addEventListener('click', () => openUrl(item.dataset.url));
+    item.addEventListener('click', () => {
+      if (Date.now() < favoriteOpenSuppressUntil) return;
+      openUrl(item.dataset.url);
+    });
   });
   container.querySelectorAll('.favorite-delete-button').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -903,8 +1505,124 @@ function bindFavoriteActions(container) {
   });
 }
 
+async function saveFavoriteOrder(category, nextUrls, movedUrl, favorites, favoriteOrder) {
+  const currentUrls = SmartFavOrder.applyFavoriteOrder(
+    favorites,
+    category,
+    favoriteOrder[category]
+  ).map((favorite) => favorite.url);
+  if (nextUrls.join('\u0000') === currentUrls.join('\u0000')) return;
+
+  const nextFavoriteOrder = {
+    ...favoriteOrder,
+    [category]: nextUrls
+  };
+  await storageSet({ favoriteOrder: nextFavoriteOrder });
+  activeFavoriteOrder = nextFavoriteOrder;
+  showFavoritesByCategory(category, favorites, nextFavoriteOrder);
+  focusReorderedItem(elements.foldersList, '.favorite-link', 'url', movedUrl);
+
+  const movedFavorite = favorites.find((favorite) => favorite.url === movedUrl);
+  const message = t('favoriteOrderUpdated', {
+    title: movedFavorite && movedFavorite.title ? movedFavorite.title : movedUrl,
+    position: nextUrls.indexOf(movedUrl) + 1
+  });
+  await finishFavoriteReorder(message, {
+    category,
+    orderedUrls: nextUrls
+  });
+}
+
+async function reorderFavorite(category, sourceUrl, targetUrl, placement) {
+  const result = await storageGet(['favorites', 'favoriteOrder']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const favoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
+  const nextUrls = SmartFavOrder.reorderFavoriteUrls(
+    favorites,
+    category,
+    favoriteOrder[category],
+    sourceUrl,
+    targetUrl,
+    placement
+  );
+  await saveFavoriteOrder(category, nextUrls, sourceUrl, favorites, favoriteOrder);
+}
+
+async function moveFavorite(category, sourceUrl, offset) {
+  const result = await storageGet(['favorites', 'favoriteOrder']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const favoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
+  const nextUrls = SmartFavOrder.moveFavoriteUrl(
+    favorites,
+    category,
+    favoriteOrder[category],
+    sourceUrl,
+    offset
+  );
+  await saveFavoriteOrder(category, nextUrls, sourceUrl, favorites, favoriteOrder);
+}
+
+function bindFavoriteReordering(container, category) {
+  let draggedUrl = '';
+  const rows = Array.from(container.querySelectorAll('.favorite-row-in-folder'));
+
+  rows.forEach((row) => {
+    const link = row.querySelector('.favorite-link');
+    if (link) {
+      link.addEventListener('keydown', (event) => {
+        if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const offset = event.key === 'ArrowUp' ? -1 : 1;
+        moveFavorite(category, link.dataset.url, offset).catch(showFavoriteReorderError);
+      });
+    }
+
+    row.addEventListener('dragstart', (event) => {
+      if (event.target.closest('.favorite-delete-button')) {
+        event.preventDefault();
+        return;
+      }
+      draggedUrl = row.dataset.favoriteUrl;
+      favoriteOpenSuppressUntil = Date.now() + 1000;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('application/x-smartfav-favorite', draggedUrl);
+      event.dataTransfer.setData('text/plain', draggedUrl);
+      requestAnimationFrame(() => row.classList.add('is-dragging'));
+    });
+
+    row.addEventListener('dragover', (event) => {
+      if (!draggedUrl || draggedUrl === row.dataset.favoriteUrl) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      markReorderTarget(container, row, getDropPlacement(event, row));
+    });
+
+    row.addEventListener('drop', (event) => {
+      if (!draggedUrl || draggedUrl === row.dataset.favoriteUrl) return;
+      event.preventDefault();
+      const placement = getDropPlacement(event, row);
+      const movedUrl = draggedUrl;
+      clearReorderMarkers(container);
+      reorderFavorite(
+        category,
+        movedUrl,
+        row.dataset.favoriteUrl,
+        placement
+      ).catch(showFavoriteReorderError);
+    });
+
+    row.addEventListener('dragend', () => {
+      draggedUrl = '';
+      favoriteOpenSuppressUntil = Date.now() + 180;
+      clearReorderMarkers(container);
+    });
+  });
+}
+
 async function deleteFavorite(url) {
   if (!url) return false;
+  const categoryToKeep = activeView === 'favorites' ? activeFavoriteCategory : null;
   try {
     if (isExtension) {
       const response = await new Promise((resolve) => {
@@ -943,6 +1661,11 @@ async function deleteFavorite(url) {
     }
     elements.errorStatus.classList.add('hidden');
     await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
+    if (categoryToKeep) {
+      const result = await storageGet(['favorites', 'favoriteOrder']);
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      showFavoritesByCategory(categoryToKeep, favorites, result.favoriteOrder);
+    }
     return true;
   } catch (error) {
     console.error('Favorite delete failed:', error);
@@ -1041,7 +1764,9 @@ function populateCompactSettings() {
   elements.compactPopupHeight.value = String(currentSettings.popupHeight);
   elements.compactAiEnabled.checked = currentSettings.aiEnabled;
   elements.compactProvider.value = currentSettings.apiProvider || 'ollama';
-  elements.compactModel.value = currentSettings.model || SmartFavAI.getProvider(elements.compactProvider.value).model;
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
+  elements.compactApiEndpoint.value = currentSettings.apiEndpoint || provider.endpoint;
+  elements.compactModel.value = currentSettings.model || provider.model;
   elements.compactApiKey.value = currentSettings.apiKey || '';
   elements.compactClassificationMode.value = currentSettings.classificationMode || 'weighted';
   elements.compactKeywordWeight.value = String(
@@ -1055,11 +1780,300 @@ function populateCompactSettings() {
   elements.compactBookmarkAutoCapture.checked = Boolean(currentSettings.bookmarkAutoCaptureEnabled);
   elements.compactSettingsStatus.textContent = '';
   elements.compactSettingsStatus.className = 'compact-settings-status';
+  showBookmarkBackupStatus();
   updateCompactAIFields(false);
   updateCompactBookmarkFields();
   updateAppearancePreview();
   updatePopupSizeLabels();
   updateBackgroundImagePreview();
+  refreshBookmarkRestorePoints();
+}
+
+function formatBookmarkRestoreTime(timestamp) {
+  const date = new Date(Number(timestamp) || 0);
+  if (!Number.isFinite(date.getTime()) || !Number(timestamp)) return '—';
+  return new Intl.DateTimeFormat(
+    currentSettings.language === 'zh_CN' ? 'zh-CN' : 'en',
+    {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }
+  ).format(date);
+}
+
+function showBookmarkBackupStatus(message = '', type = '') {
+  elements.bookmarkBackupStatus.textContent = message;
+  elements.bookmarkBackupStatus.className = `bookmark-backup-status${type ? ` ${type}` : ''}`;
+}
+
+function hasRestorableBookmarkPoint(point) {
+  return Boolean(point) && Number(point.bookmarkCount) > 0;
+}
+
+function setBookmarkBackupBusy(busy) {
+  const hasRestorablePoint = hasRestorableBookmarkPoint(currentBookmarkRestorePoint);
+  [
+    elements.bookmarkBackupCreateBtn,
+    elements.bookmarkBackupPreviewBtn,
+    elements.bookmarkBackupRestoreBtn,
+    elements.bookmarkBackupExportBtn
+  ].forEach((button) => {
+    button.disabled = Boolean(busy)
+      || (button !== elements.bookmarkBackupCreateBtn && !hasRestorablePoint);
+  });
+  elements.bookmarkBackupImportInput.disabled = Boolean(busy);
+}
+
+function renderBookmarkRestorePointState(response) {
+  const points = response && Array.isArray(response.points) ? response.points : [];
+  const activePoint = response && response.activePoint;
+  const latestPoint = activePoint || points[0] || null;
+  currentBookmarkRestorePoint = latestPoint;
+  const hasRestorablePoint = hasRestorableBookmarkPoint(latestPoint);
+  const legacyManagedCount = Number(latestPoint && latestPoint.legacyManagedCount) || 0;
+
+  elements.bookmarkBackupBadge.classList.toggle(
+    'is-active',
+    Boolean(activePoint) && hasRestorablePoint
+  );
+  elements.bookmarkBackupBadge.classList.toggle(
+    'is-limited',
+    Boolean(latestPoint) && !hasRestorablePoint && legacyManagedCount > 0
+  );
+  if (latestPoint && !hasRestorablePoint && legacyManagedCount > 0) {
+    elements.bookmarkBackupBadge.textContent = t('bookmarkRestoreLegacyOnlyBadge');
+    elements.bookmarkBackupSummary.textContent = t('bookmarkRestoreLegacyOnlySummary', {
+      count: legacyManagedCount
+    });
+  } else if (latestPoint && !hasRestorablePoint) {
+    elements.bookmarkBackupBadge.textContent = t('bookmarkRestoreNothingBadge');
+    elements.bookmarkBackupSummary.textContent = t('bookmarkRestoreNothingSummary');
+  } else if (activePoint) {
+    elements.bookmarkBackupBadge.textContent = t('bookmarkRestoreActiveBadge');
+    elements.bookmarkBackupSummary.textContent = t('bookmarkRestoreActiveSummary', {
+      count: activePoint.bookmarkCount || 0,
+      folders: activePoint.folderCount || 0,
+      time: formatBookmarkRestoreTime(activePoint.updatedAt || activePoint.createdAt)
+    });
+  } else if (latestPoint) {
+    elements.bookmarkBackupBadge.textContent = t('bookmarkRestoreDoneBadge');
+    elements.bookmarkBackupSummary.textContent = t('bookmarkRestoreDoneSummary', {
+      time: formatBookmarkRestoreTime(latestPoint.restoredAt || latestPoint.updatedAt)
+    });
+  } else {
+    elements.bookmarkBackupBadge.textContent = t('bookmarkRestoreEmptyBadge');
+    elements.bookmarkBackupSummary.textContent = t('bookmarkRestoreEmpty');
+  }
+
+  if (hasRestorablePoint && legacyManagedCount > 0) {
+    elements.bookmarkBackupSummary.textContent += ` ${t('bookmarkRestoreLegacy', {
+      count: legacyManagedCount
+    })}`;
+  }
+  setBookmarkBackupBusy(false);
+}
+
+async function refreshBookmarkRestorePoints() {
+  try {
+    const response = await sendRuntimeMessage('getBookmarkRestorePoints');
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreUnavailable'));
+    }
+    renderBookmarkRestorePointState(response);
+  } catch (error) {
+    currentBookmarkRestorePoint = null;
+    renderBookmarkRestorePointState({ status: 'error', points: [], activePoint: null });
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  }
+}
+
+async function createOrUpdateBookmarkRestorePoint() {
+  setBookmarkBackupBusy(true);
+  showBookmarkBackupStatus();
+  try {
+    const response = await sendRuntimeMessage('createBookmarkRestorePoint');
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreUnavailable'));
+    }
+    const bookmarkCount = Number(response.point && response.point.bookmarkCount) || 0;
+    const legacyManagedCount = Number(response.point && response.point.legacyManagedCount) || 0;
+    const statusKey = bookmarkCount > 0
+      ? 'bookmarkRestoreCreated'
+      : legacyManagedCount > 0
+        ? 'bookmarkRestoreScannedLegacy'
+        : 'bookmarkRestoreScannedEmpty';
+    showBookmarkBackupStatus(t(statusKey, {
+      count: bookmarkCount > 0 ? bookmarkCount : legacyManagedCount
+    }), 'success');
+    await refreshBookmarkRestorePoints();
+  } catch (error) {
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  } finally {
+    setBookmarkBackupBusy(false);
+  }
+}
+
+async function previewBookmarkRestore() {
+  if (!hasRestorableBookmarkPoint(currentBookmarkRestorePoint)) return;
+  setBookmarkBackupBusy(true);
+  showBookmarkBackupStatus();
+  try {
+    const response = await sendRuntimeMessage('previewBookmarkRestore', {
+      pointId: currentBookmarkRestorePoint.id
+    });
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreUnavailable'));
+    }
+    showBookmarkBackupStatus(t('bookmarkRestorePreviewDone', {
+      movable: response.movable || 0,
+      restored: response.alreadyRestored || 0,
+      folders: response.foldersToRecreate || 0,
+      missing: response.missingBookmarks || 0
+    }), 'success');
+  } catch (error) {
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  } finally {
+    setBookmarkBackupBusy(false);
+  }
+}
+
+async function restoreBookmarkFolders() {
+  if (!hasRestorableBookmarkPoint(currentBookmarkRestorePoint)) return;
+  if (!window.confirm(t('bookmarkRestoreConfirm'))) return;
+  setBookmarkBackupBusy(true);
+  showBookmarkBackupStatus();
+  try {
+    const response = await sendRuntimeMessage('restoreBookmarkLayout', {
+      pointId: currentBookmarkRestorePoint.id
+    });
+    if (!response || !['ok', 'partial'].includes(response.status)) {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreUnavailable'));
+    }
+    if (response.status === 'partial') {
+      const firstError = response.errors && response.errors[0];
+      showBookmarkBackupStatus(t('bookmarkRestorePartial', {
+        message: firstError && firstError.message
+          ? firstError.message
+          : `${response.unresolvedParents || 0}`
+      }), 'error');
+    } else {
+      showBookmarkBackupStatus(t('bookmarkRestoreCompleted', {
+        restored: response.restored || 0,
+        unchanged: response.alreadyRestored || 0,
+        folders: response.createdFolders || 0
+      }), 'success');
+    }
+    await refreshBookmarkRestorePoints();
+  } catch (error) {
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  } finally {
+    setBookmarkBackupBusy(false);
+  }
+}
+
+function downloadBookmarkRestorePayload(payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json'
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const date = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `SmartFav-layout-backup-${date}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function exportBookmarkRestorePoints() {
+  if (!hasRestorableBookmarkPoint(currentBookmarkRestorePoint)) return;
+  setBookmarkBackupBusy(true);
+  showBookmarkBackupStatus();
+  try {
+    const response = await sendRuntimeMessage('exportBookmarkRestorePoints');
+    if (!response || response.status !== 'ok' || !response.payload) {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreUnavailable'));
+    }
+    downloadBookmarkRestorePayload(response.payload);
+    showBookmarkBackupStatus(t('bookmarkRestoreExported'), 'success');
+  } catch (error) {
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  } finally {
+    setBookmarkBackupBusy(false);
+  }
+}
+
+function readBookmarkRestoreFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result || '')), { once: true });
+    reader.addEventListener('error', () => reject(new Error(t('bookmarkRestoreImportInvalid'))), { once: true });
+    reader.readAsText(file);
+  });
+}
+
+async function importBookmarkRestorePoints() {
+  const file = elements.bookmarkBackupImportInput.files
+    && elements.bookmarkBackupImportInput.files[0];
+  if (!file) return;
+  setBookmarkBackupBusy(true);
+  showBookmarkBackupStatus();
+  try {
+    if (file.size > 8 * 1024 * 1024) {
+      throw new Error(t('bookmarkRestoreImportTooLarge'));
+    }
+    let payload;
+    try {
+      payload = JSON.parse(await readBookmarkRestoreFile(file));
+    } catch (error) {
+      if (error && error.message === t('bookmarkRestoreImportTooLarge')) throw error;
+      throw new Error(t('bookmarkRestoreImportInvalid'));
+    }
+    const response = await sendRuntimeMessage('importBookmarkRestorePoints', { payload });
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message
+        ? response.message
+        : t('bookmarkRestoreImportInvalid'));
+    }
+    showBookmarkBackupStatus(t('bookmarkRestoreImported', {
+      count: response.imported || 0
+    }), 'success');
+    await refreshBookmarkRestorePoints();
+  } catch (error) {
+    showBookmarkBackupStatus(
+      t('bookmarkRestoreOperationFailed', { message: error.message }),
+      'error'
+    );
+  } finally {
+    elements.bookmarkBackupImportInput.value = '';
+    setBookmarkBackupBusy(false);
+  }
 }
 
 function populateCategoryManager() {
@@ -1155,7 +2169,10 @@ async function handleBackgroundImageChange() {
     pendingBackgroundImage = await readBackgroundImage(file);
     updateBackgroundImagePreview();
     updateAppearancePreview();
-    showCompactSettingsStatus(t('backgroundImageReady'), 'success');
+    await persistSettingsPatch(
+      { customBackgroundImage: pendingBackgroundImage },
+      { applyAppearanceNow: true, statusKey: 'backgroundImageReady' }
+    );
   } catch (error) {
     showCompactSettingsStatus(error.message, 'error');
   } finally {
@@ -1163,11 +2180,14 @@ async function handleBackgroundImageChange() {
   }
 }
 
-function clearBackgroundImage() {
+async function clearBackgroundImage() {
   pendingBackgroundImage = '';
   updateBackgroundImagePreview();
   updateAppearancePreview();
-  showCompactSettingsStatus(t('backgroundImageCleared'), 'success');
+  await persistSettingsPatch(
+    { customBackgroundImage: '' },
+    { applyAppearanceNow: true, statusKey: 'backgroundImageCleared' }
+  );
 }
 
 function handlePopupSizeInput() {
@@ -1175,20 +2195,97 @@ function handlePopupSizeInput() {
   updateAppearancePreview();
 }
 
-function handleThemeStyleChange() {
+async function handlePopupSizeChange() {
+  await persistSettingsPatch(
+    {
+      popupWidth: normalizePopupDimension(
+        elements.compactPopupWidth.value,
+        320,
+        520,
+        DEFAULT_SETTINGS.popupWidth
+      ),
+      popupHeight: normalizePopupDimension(
+        elements.compactPopupHeight.value,
+        420,
+        600,
+        DEFAULT_SETTINGS.popupHeight
+      )
+    },
+    { applyAppearanceNow: true }
+  );
+}
+
+async function handleThemeStyleChange() {
   const nextThemeStyle = normalizeThemeStyle(elements.compactThemeStyle.value);
   if (previewThemeStyle === 'black' && nextThemeStyle !== 'black') {
     elements.compactDarkMode.checked = false;
   }
   updateAppearancePreview();
+  await persistSettingsPatch(
+    {
+      themeStyle: nextThemeStyle,
+      colorMode: nextThemeStyle === 'black' || elements.compactDarkMode.checked
+        ? 'dark'
+        : 'light'
+    },
+    { applyAppearanceNow: true }
+  );
+}
+
+async function handleDarkModeChange() {
+  updateAppearancePreview();
+  await persistSettingsPatch(
+    {
+      colorMode: elements.compactDarkMode.checked ? 'dark' : 'light'
+    },
+    { applyAppearanceNow: true }
+  );
 }
 
 function updateCompactAIFields(resetModel) {
   const provider = SmartFavAI.getProvider(elements.compactProvider.value);
   elements.compactAiFields.classList.toggle('hidden', !elements.compactAiEnabled.checked);
   elements.compactApiKeyField.classList.toggle('hidden', !provider.requiresKey);
+  elements.compactApiEndpointField.classList.toggle('hidden', !provider.customEndpoint);
+  if (provider.customEndpoint && (resetModel || !elements.compactApiEndpoint.value.trim())) {
+    elements.compactApiEndpoint.value = provider.endpoint;
+  }
   if (resetModel || !elements.compactModel.value.trim()) elements.compactModel.value = provider.model;
   elements.compactKeywordWeightValue.textContent = elements.compactKeywordWeight.value;
+}
+
+function getApiEndpointValidation(provider) {
+  if (!provider.customEndpoint) return null;
+  return SmartFavAI.validateEndpoint(elements.compactApiEndpoint.value);
+}
+
+function showApiEndpointValidationError(validation) {
+  const messageKeys = {
+    required: 'apiEndpointRequired',
+    invalid: 'apiEndpointInvalid',
+    insecure: 'apiEndpointInsecure'
+  };
+  showCompactSettingsStatus(t(messageKeys[validation.code] || 'apiEndpointInvalid'), 'error');
+}
+
+function requestApiEndpointPermission(validation) {
+  if (
+    !isExtension
+    || !chrome.permissions
+    || typeof chrome.permissions.request !== 'function'
+  ) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve, reject) => {
+    chrome.permissions.request({ origins: [validation.originPattern] }, (granted) => {
+      const runtimeError = chrome.runtime && chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      resolve(Boolean(granted));
+    });
+  });
 }
 
 function updateCompactBookmarkFields() {
@@ -1198,10 +2295,113 @@ function updateCompactBookmarkFields() {
   );
 }
 
-async function persistBookmarkSettings(patch) {
+async function persistSettingsPatch(
+  patch,
+  {
+    applyAppearanceNow = false,
+    refreshSuggestion = false,
+    statusKey = 'settingsAutoSaved'
+  } = {}
+) {
   currentSettings = { ...currentSettings, ...patch };
-  await storageSet({ settings: currentSettings });
-  showCompactSettingsStatus(t('settingsSaved'), 'success');
+  const settingsSnapshot = { ...currentSettings };
+  const saveTask = settingsSaveQueue
+    .catch(() => undefined)
+    .then(() => storageSet({ settings: settingsSnapshot }));
+  settingsSaveQueue = saveTask;
+  try {
+    await saveTask;
+    if (applyAppearanceNow) applyAppearance();
+    if (refreshSuggestion && currentTabInfo) {
+      currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+      showCategorySuggestion(currentSuggestion);
+    }
+    showCompactSettingsStatus(t(statusKey), 'success');
+    return true;
+  } catch (error) {
+    showCompactSettingsStatus(
+      t('settingsAutoSaveFailed', { message: error.message }),
+      'error'
+    );
+    return false;
+  }
+}
+
+async function persistAISettings({ refreshSuggestion = false } = {}) {
+  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
+  if (
+    elements.compactAiEnabled.checked
+    && provider.requiresKey
+    && !elements.compactApiKey.value.trim()
+  ) {
+    showCompactSettingsStatus(t('apiKeyRequired'), 'error');
+    return false;
+  }
+  if (elements.compactAiEnabled.checked && !elements.compactModel.value.trim()) {
+    showCompactSettingsStatus(t('modelRequired'), 'error');
+    return false;
+  }
+
+  const endpointValidation = getApiEndpointValidation(provider);
+  if (endpointValidation && !endpointValidation.valid) {
+    showApiEndpointValidationError(endpointValidation);
+    return false;
+  }
+  if (elements.compactAiEnabled.checked && endpointValidation) {
+    try {
+      const granted = await requestApiEndpointPermission(endpointValidation);
+      if (!granted) {
+        showCompactSettingsStatus(t('apiEndpointPermissionDenied'), 'error');
+        return false;
+      }
+    } catch (error) {
+      showCompactSettingsStatus(
+        t('apiEndpointPermissionFailed', { message: error.message }),
+        'error'
+      );
+      return false;
+    }
+  }
+
+  return persistSettingsPatch(
+    {
+      aiEnabled: elements.compactAiEnabled.checked,
+      aiAutoClassify: elements.compactAiAutoClassify.checked,
+      aiCreateCategories: elements.compactAiCreateCategories.checked,
+      classificationMode: elements.compactClassificationMode.value === 'vector'
+        ? 'vector'
+        : 'weighted',
+      classificationWeights: SmartFavClassifier.normalizeWeights({
+        ...currentSettings.classificationWeights,
+        keywords: Number(elements.compactKeywordWeight.value)
+      }),
+      apiProvider: elements.compactProvider.value,
+      apiEndpoint: provider.customEndpoint && endpointValidation
+        ? endpointValidation.endpoint
+        : '',
+      apiKey: elements.compactApiKey.value.trim(),
+      model: elements.compactModel.value.trim() || provider.model
+    },
+    { refreshSuggestion }
+  );
+}
+
+async function handleAIEnabledChange() {
+  updateCompactAIFields(false);
+  await persistAISettings({ refreshSuggestion: true });
+}
+
+async function handleAIProviderChange() {
+  updateCompactAIFields(true);
+  await persistAISettings();
+}
+
+async function handleAIClassificationChange() {
+  await persistAISettings({ refreshSuggestion: true });
+}
+
+async function persistBookmarkSettings(patch) {
+  return persistSettingsPatch(patch);
 }
 
 async function handleBrowserBookmarkWriteChange() {
@@ -1223,10 +2423,10 @@ function getClassificationDraftSettings() {
 
 async function handleBookmarkOrganizeChange() {
   const enabled = elements.compactBookmarkOrganizeEnabled.checked;
-  await persistBookmarkSettings({
+  const saved = await persistBookmarkSettings({
     bookmarkOrganizeEnabled: enabled
   });
-  if (enabled) await runOrganizeBookmarks();
+  if (saved && enabled) await runOrganizeBookmarks();
 }
 
 async function handleBookmarkAutoCaptureChange() {
@@ -1248,10 +2448,19 @@ function normalizeCategoryName(value) {
 }
 
 function splitKeywords(value) {
-  return [...new Set(String(value || '')
-    .split(/[,，]/)
-    .map((keyword) => keyword.trim())
-    .filter(Boolean))];
+  return SmartFavClassifier.splitKeywords(value);
+}
+
+function updateCategoryKeywordsFromInput(input, { format = false } = {}) {
+  const index = Number(input.dataset.categoryIndex);
+  if (!Number.isInteger(index) || !categoryDraft[index]) return;
+  const keywords = splitKeywords(input.value);
+  categoryDraft[index].keywords = keywords;
+  if (!format) return;
+  const formattedValue = keywords.join(', ');
+  if (input.value.trim() === formattedValue) return;
+  input.value = formattedValue;
+  showCategorySettingsStatus(t('keywordsNormalized'), 'success');
 }
 
 function renderCategoryRules() {
@@ -1268,14 +2477,15 @@ function renderCategoryRules() {
       </div>
       <label class="category-rule-keywords">
         <span>${escapeHtml(t('matchingKeywords'))}</span>
-        <input
+        <textarea
           class="category-keywords-input"
-          type="text"
+          rows="1"
           autocomplete="off"
+          spellcheck="false"
+          aria-describedby="keywordSeparatorHint"
           data-category-index="${index}"
-          value="${escapeHtml(item.keywords.join(', '))}"
           placeholder="${escapeHtml(t('keywordsPlaceholder'))}"
-        >
+        >${escapeHtml(item.keywords.join(', '))}</textarea>
       </label>
     </div>
   `).join('');
@@ -1372,16 +2582,25 @@ async function reclassifyStoredFavorites() {
 }
 
 elements.compactThemeStyle.addEventListener('change', handleThemeStyleChange);
-elements.compactDarkMode.addEventListener('change', updateAppearancePreview);
-elements.compactAiEnabled.addEventListener('change', () => updateCompactAIFields(false));
-elements.compactProvider.addEventListener('change', () => updateCompactAIFields(true));
+elements.compactDarkMode.addEventListener('change', handleDarkModeChange);
+elements.compactAiEnabled.addEventListener('change', handleAIEnabledChange);
+elements.compactProvider.addEventListener('change', handleAIProviderChange);
 elements.compactPopupWidth.addEventListener('input', handlePopupSizeInput);
 elements.compactPopupHeight.addEventListener('input', handlePopupSizeInput);
+elements.compactPopupWidth.addEventListener('change', handlePopupSizeChange);
+elements.compactPopupHeight.addEventListener('change', handlePopupSizeChange);
 elements.compactBackgroundImage.addEventListener('change', handleBackgroundImageChange);
 elements.clearBackgroundImageBtn.addEventListener('click', clearBackgroundImage);
 elements.compactKeywordWeight.addEventListener('input', () => {
   elements.compactKeywordWeightValue.textContent = elements.compactKeywordWeight.value;
 });
+elements.compactKeywordWeight.addEventListener('change', handleAIClassificationChange);
+elements.compactClassificationMode.addEventListener('change', handleAIClassificationChange);
+elements.compactApiEndpoint.addEventListener('change', () => persistAISettings());
+elements.compactModel.addEventListener('change', () => persistAISettings());
+elements.compactApiKey.addEventListener('change', () => persistAISettings());
+elements.compactAiAutoClassify.addEventListener('change', () => persistAISettings());
+elements.compactAiCreateCategories.addEventListener('change', () => persistAISettings());
 elements.compactBrowserBookmarksEnabled.addEventListener('change', handleBrowserBookmarkWriteChange);
 elements.compactBookmarkOrganizeEnabled.addEventListener('change', handleBookmarkOrganizeChange);
 elements.compactBookmarkAutoCapture.addEventListener('change', handleBookmarkAutoCaptureChange);
@@ -1394,9 +2613,11 @@ elements.compactNewCategory.addEventListener('keydown', (event) => {
 });
 elements.categoryRulesList.addEventListener('input', (event) => {
   if (!event.target.classList.contains('category-keywords-input')) return;
-  const index = Number(event.target.dataset.categoryIndex);
-  if (!Number.isInteger(index) || !categoryDraft[index]) return;
-  categoryDraft[index].keywords = splitKeywords(event.target.value);
+  updateCategoryKeywordsFromInput(event.target);
+});
+elements.categoryRulesList.addEventListener('focusout', (event) => {
+  if (!event.target.classList.contains('category-keywords-input')) return;
+  updateCategoryKeywordsFromInput(event.target, { format: true });
 });
 elements.categoryRulesList.addEventListener('click', (event) => {
   const removeButton = event.target.closest('.category-remove-button');
@@ -1440,67 +2661,6 @@ elements.categorySaveBtn.addEventListener('click', async () => {
   }
 });
 
-elements.compactSaveBtn.addEventListener('click', async () => {
-  const provider = SmartFavAI.getProvider(elements.compactProvider.value);
-  if (elements.compactAiEnabled.checked && provider.requiresKey && !elements.compactApiKey.value.trim()) {
-    showCompactSettingsStatus(t('apiKeyRequired'), 'error');
-    return;
-  }
-  const wasOrganizeActive = currentSettings.bookmarkOrganizeEnabled;
-  currentSettings = {
-    ...currentSettings,
-    themeStyle: normalizeThemeStyle(elements.compactThemeStyle.value),
-    colorMode: elements.compactThemeStyle.value === 'black' || elements.compactDarkMode.checked
-      ? 'dark'
-      : 'light',
-    popupWidth: normalizePopupDimension(
-      elements.compactPopupWidth.value,
-      320,
-      520,
-      DEFAULT_SETTINGS.popupWidth
-    ),
-    popupHeight: normalizePopupDimension(
-      elements.compactPopupHeight.value,
-      420,
-      600,
-      DEFAULT_SETTINGS.popupHeight
-    ),
-    customBackgroundImage: pendingBackgroundImage,
-    aiEnabled: elements.compactAiEnabled.checked,
-    aiAutoClassify: elements.compactAiAutoClassify.checked,
-    aiCreateCategories: elements.compactAiCreateCategories.checked,
-    classificationMode: elements.compactClassificationMode.value === 'vector'
-      ? 'vector'
-      : 'weighted',
-    classificationWeights: SmartFavClassifier.normalizeWeights({
-      ...currentSettings.classificationWeights,
-      keywords: Number(elements.compactKeywordWeight.value)
-    }),
-    apiProvider: elements.compactProvider.value,
-    apiKey: elements.compactApiKey.value.trim(),
-    model: elements.compactModel.value.trim() || provider.model,
-    browserBookmarksEnabled: elements.compactBrowserBookmarksEnabled.checked,
-    bookmarkWriteMode: elements.compactBookmarkWriteMode.value === 'add' ? 'add' : 'overwrite',
-    bookmarkOrganizeEnabled: elements.compactBookmarkOrganizeEnabled.checked,
-    bookmarkAutoCaptureEnabled: elements.compactBookmarkAutoCapture.checked
-  };
-  await storageSet({ settings: currentSettings });
-  applyAppearance();
-  await renderFolders();
-  if (currentTabInfo) {
-    currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
-    showCategorySuggestion(currentSuggestion);
-  }
-  showCompactSettingsStatus(t('settingsSaved'), 'success');
-  if (currentTabInfo && currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
-    await enhanceCurrentSuggestion({ automatic: true });
-  }
-  const organizeActive = currentSettings.bookmarkOrganizeEnabled;
-  if (organizeActive && !wasOrganizeActive) {
-    await runOrganizeBookmarks();
-  }
-});
-
 async function runOrganizeBookmarks() {
   if (!isExtension) {
     showCompactSettingsStatus(t('browserBookmarkUnavailable'), 'error');
@@ -1534,6 +2694,7 @@ async function runOrganizeBookmarks() {
       }),
       'success'
     );
+    await refreshBookmarkRestorePoints();
     await Promise.all([renderFolders(), renderRecentFavorites()]);
   } catch (error) {
     showCompactSettingsStatus(t('organizeFailed', { message: error.message }), 'error');
@@ -1548,6 +2709,11 @@ async function handleOrganizeNow() {
 }
 
 elements.compactOrganizeBtn.addEventListener('click', handleOrganizeNow);
+elements.bookmarkBackupCreateBtn.addEventListener('click', createOrUpdateBookmarkRestorePoint);
+elements.bookmarkBackupPreviewBtn.addEventListener('click', previewBookmarkRestore);
+elements.bookmarkBackupRestoreBtn.addEventListener('click', restoreBookmarkFolders);
+elements.bookmarkBackupExportBtn.addEventListener('click', exportBookmarkRestorePoints);
+elements.bookmarkBackupImportInput.addEventListener('change', importBookmarkRestorePoints);
 
 elements.compactTestBtn.addEventListener('click', async () => {
   const provider = SmartFavAI.getProvider(elements.compactProvider.value);
@@ -1555,19 +2721,41 @@ elements.compactTestBtn.addEventListener('click', async () => {
     showCompactSettingsStatus(t('enterApiKeyFirst'), 'error');
     return;
   }
+  if (!elements.compactModel.value.trim()) {
+    showCompactSettingsStatus(t('modelRequired'), 'error');
+    return;
+  }
+  const endpointValidation = getApiEndpointValidation(provider);
+  if (endpointValidation && !endpointValidation.valid) {
+    showApiEndpointValidationError(endpointValidation);
+    return;
+  }
+  const permissionRequest = endpointValidation
+    ? requestApiEndpointPermission(endpointValidation)
+    : Promise.resolve(true);
   elements.compactTestBtn.disabled = true;
   elements.compactTestBtn.textContent = t('testing');
   try {
+    const granted = await permissionRequest;
+    if (!granted) {
+      showCompactSettingsStatus(t('apiEndpointPermissionDenied'), 'error');
+      return;
+    }
     const response = await SmartFavAI.call(t('testPrompt'), {
       language: currentSettings.language,
       apiProvider: elements.compactProvider.value,
+      apiEndpoint: endpointValidation ? endpointValidation.endpoint : '',
       apiKey: elements.compactApiKey.value.trim(),
       model: elements.compactModel.value.trim() || provider.model
     });
     if (!response) throw new Error(t('serviceNoContent'));
     showCompactSettingsStatus(t('connectionSuccess'), 'success');
   } catch (error) {
-    showCompactSettingsStatus(error.message, 'error');
+    const message = endpointValidation
+      && /permission|权限|not allowed/i.test(error.message)
+      ? t('apiEndpointPermissionFailed', { message: error.message })
+      : error.message;
+    showCompactSettingsStatus(message, 'error');
   } finally {
     elements.compactTestBtn.disabled = false;
     elements.compactTestBtn.textContent = t('testConnection');
