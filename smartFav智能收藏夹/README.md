@@ -140,6 +140,8 @@ SmartFav
 
 完整的权限用途、单一用途说明、隐私披露和邮箱验证步骤见仓库的 [`docs/edge-store-submission.md`](../docs/edge-store-submission.md)。
 
+## 版本记录
+
 版本 1.5.0 移除 `action.default_popup`，改为工具栏点击时通过 `activeTab + scripting` 注入隔离的悬浮窗。现有 `popup.html` 作为扩展源 iframe 复用，保留原有收藏、设置、中英文、主题与浏览器收藏夹能力，同时让圆角外部真正显示当前网页。
 
 版本 1.5.1 为 Edge 保护页面增加“我的收藏”备用窗口：当悬浮窗不能注入时，不再只显示红色感叹号，而是仍允许查看已有收藏和进入设置。
