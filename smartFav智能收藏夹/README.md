@@ -141,7 +141,7 @@ SmartFav
 1. 使用项目生成的 `dist/SmartFav-Edge-1.14.2.zip`，或自行将 `smartFav智能收藏夹` 文件夹内的文件压缩，确保 `manifest.json` 位于 ZIP 根目录。
 2. 在 Microsoft Partner Center 的扩展提交页面上传 ZIP。
 3. 上传成功后，在 Store listings 中确认出现“中文（简体）”和“English”。
-4. 分别填写两种语言的商店长描述，并上传仓库 `docs/store-assets` 中对应语言的 `1280 × 800` 截图。
+4. 分别填写两种语言的商店长描述，并使用虚拟测试数据在本地生成对应语言的 `1280 × 800` 截图；确认截图不含真实书签、邮箱、头像、账号名称、本机路径或内部网址后，直接上传到商店后台。公开仓库不保存商店截图素材。
 5. 隐私政策填写 `https://github.com/003jia/SmartFav/blob/main/PRIVACY.md`。
 6. 发布方联系邮箱必须在 Partner Center 的开发人员设置中单独保存并完成验证；这项账号信息不包含在扩展包中。
 

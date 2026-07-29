@@ -8,25 +8,21 @@
 
 ### 促销瓷砖
 
-- 小型促销瓷砖，`440 × 280` PNG：[`smartfav-small-promo-440x280.png`](store-assets/smartfav-small-promo-440x280.png)
-- 大型促销瓷砖，`1400 × 560` PNG：[`smartfav-large-promo-1400x560.png`](store-assets/smartfav-large-promo-1400x560.png)
+- 小型促销瓷砖：`440 × 280` PNG。
+- 大型促销瓷砖：`1400 × 560` PNG。
+- 促销图只使用 SmartFav 品牌元素和虚拟内容，不放入真实书签、账号头像、邮箱、浏览器个人资料或内部网址。
 
 ### 功能截图
 
-当前上传页支持最多 5 张截图，按以下顺序上传这组 `1280 × 800` PNG：
+当前上传页支持最多 5 张截图。建议在独立测试浏览器资料中使用虚拟书签，按以下顺序本地生成 `1280 × 800` PNG：
 
-1. [`smartfav-store-01-local-classification-1280x800.png`](store-assets/smartfav-store-01-local-classification-1280x800.png) — 本地规则一键分类
-2. [`smartfav-store-02-favorites-management-1280x800.png`](store-assets/smartfav-store-02-favorites-management-1280x800.png) — 收藏管理、排序与跨分类移动
-3. [`smartfav-store-03-browser-sync-1280x800.png`](store-assets/smartfav-store-03-browser-sync-1280x800.png) — 浏览器收藏夹同步
-4. [`smartfav-store-04-custom-rules-1280x800.png`](store-assets/smartfav-store-04-custom-rules-1280x800.png) — 自定义分类文件夹与关键词
-5. [`smartfav-store-05-layout-backup-1280x800.png`](store-assets/smartfav-store-05-layout-backup-1280x800.png) — 整理前布局备份与还原
+1. 本地规则一键分类。
+2. 收藏管理、排序与跨分类移动。
+3. 浏览器收藏夹同步。
+4. 自定义分类文件夹与关键词。
+5. 整理前布局备份与还原。
 
-如需为 English 商店列表先提供一张全英文截图，可继续使用
-[`smartfav-edge-store-en-1280x800.png`](store-assets/smartfav-edge-store-en-1280x800.png)；中文概览图为
-[`smartfav-edge-store-zh-1280x800.png`](store-assets/smartfav-edge-store-zh-1280x800.png)。
-
-全部成品已汇总到 `docs/store-assets/SmartFav-Store-Assets-1.13.0.zip`。可编辑排版源文件是
-[`store-assets.html`](store-assets/store-assets.html)，真实插件界面素材位于 `store-assets/source/`。
+中文和 English 商店列表分别生成对应语言截图。截图生成完成后逐张检查，不得出现真实收藏标题、私人域名、公司内部网址、邮箱、头像、账号名称、本机文件路径、API Key 或浏览器同步数据。图片只上传到商店后台，不提交到公开源码仓库。
 
 ## 2. 发布方联系邮箱
 
@@ -120,10 +116,10 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 
 ## 5. 最终检查
 
-- 扩展包：`dist/SmartFav-Edge-1.13.0.zip`
+- 扩展包：`dist/SmartFav-Edge-1.14.2.zip`
 - 中文与 English 商店列表均填写完整。
-- 上传 5 张中文功能截图；English 商店列表至少上传现有英文概览图。
-- 小型与大型促销瓷砖已按上传页标注的精确尺寸准备。
+- 使用虚拟测试数据本地生成并上传功能截图，中文和 English 图片均完成隐私检查。
+- 小型与大型促销瓷砖已按上传页标注的精确尺寸准备，且不包含个人或内部信息。
 - 发布方联系邮箱已保存且验证状态为已验证。
 - 隐私政策 URL 可在无登录、无本地环境的情况下公开访问。
 - Privacy 页面填写内容与扩展权限和隐私政策一致。

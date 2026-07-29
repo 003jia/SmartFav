@@ -1,10 +1,6 @@
 # SmartFav 智能收藏夹
 
 <p align="center">
-  <img src="docs/github-assets/smartfav-github-hero.jpg" alt="SmartFav — Local-first bookmark organizer" width="100%">
-</p>
-
-<p align="center">
   本地优先、AI 可选增强的 Chrome / Edge 书签整理插件。
   <br>
   A local-first bookmark organizer with optional AI, bilingual UI, browser sync, and layout backup.
@@ -27,10 +23,6 @@
 SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独立窗口。它会根据当前网页的标题、网址、网站标签和描述建议分类；基础分类完全在浏览器本地运行，不要求注册账号或配置 API Key。
 
 需要更智能的判断时，可以按需启用本机 Ollama、现成云服务，或填写兼容 OpenAI Chat Completions / Anthropic Messages 的接口地址、模型与 API Key。AI 始终是可选增强，不会阻断基础收藏流程。
-
-<p align="center">
-  <img src="docs/github-assets/smartfav-feature-overview.jpg" alt="SmartFav 本地分类、收藏管理和浏览器同步功能概览" width="100%">
-</p>
 
 ## 核心能力
 
@@ -70,7 +62,7 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
 
 - [`SmartFav-Edge-1.14.2.zip`](dist/SmartFav-Edge-1.14.2.zip)：Manifest V3 扩展包。
-- 历史正式版本可在 [GitHub Releases](https://github.com/003jia/SmartFav/releases) 查看。
+- 公开仓库只保留当前版本安装包，不长期存放历史二进制文件。
 
 > 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
 
@@ -105,8 +97,8 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 - [隐私政策（中英双语）](PRIVACY.md)
 - [Microsoft Edge Add-ons 提交清单](docs/edge-store-submission.md)
-- [中文商店截图（1280 × 800）](docs/store-assets/smartfav-edge-store-zh-1280x800.png)
-- [English store screenshot (1280 × 800)](docs/store-assets/smartfav-edge-store-en-1280x800.png)
+
+为避免真实收藏、浏览器账号或本机环境信息进入公开仓库，商店截图和促销图片不再随源码保存。提交商店前请使用虚拟测试数据在本地生成素材，检查无个人书签、邮箱、头像、账号名称、本机路径及内部网址后，直接上传到对应商店后台。
 
 公开隐私政策地址：
 

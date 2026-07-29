@@ -4,3 +4,9 @@ node_modules/
 *.log
 .playwright-cli/
 audit/
+docs/github-assets/
+docs/store-assets/
+docs/smartfav-popup.png
+
+# 构建产物（正式版本发布到 GitHub Releases，不入库）
+dist/
