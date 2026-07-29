@@ -109,12 +109,16 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 扩展源码位于 `smartFav智能收藏夹`，`manifest.json` 位于该目录根部。
 
 ```bash
+node --check smartFav智能收藏夹/constants.js
+node --check smartFav智能收藏夹/i18n.js
+node --check smartFav智能收藏夹/classifier.js
 node --check smartFav智能收藏夹/browser-bookmarks.js
+node --check smartFav智能收藏夹/bookmark-backup.js
+node --check smartFav智能收藏夹/order-utils.js
+node --check smartFav智能收藏夹/ai-client.js
+node --check smartFav智能收藏夹/ai-keyword-suggestions.js
 node --check smartFav智能收藏夹/background.js
 node --check smartFav智能收藏夹/popup.js
-node --check smartFav智能收藏夹/classifier.js
-node --check smartFav智能收藏夹/ai-keyword-suggestions.js
-node --check smartFav智能收藏夹/order-utils.js
 node tests/verify-extension.js
 unzip -t dist/SmartFav-Edge-1.14.2.zip
 ```

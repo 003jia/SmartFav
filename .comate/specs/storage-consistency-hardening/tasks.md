@@ -63,7 +63,7 @@
     - 8.3: 保留 `options.js` 与 `options.html`（扩展选项入口落地页，删除会导致入口失效）
     - 8.4: 跑验证脚本中的 manifest 契约用例
 
-- [ ] Task 9: 补充行为测试
+- [x] Task 9: 补充行为测试
     - 9.1: 新增用例：并发发起两个 `saveFavorite`，断言两条收藏都存在、无覆盖，验证锁真实生效
     - 9.2: 新增用例：mock 置位 `chrome.runtime.lastError` 时 `setStoredFavorites` 确实 reject，且消息回传 `status: 'error'`
     - 9.3: 将两个新用例接入 `verify-extension.js` 的执行序列
