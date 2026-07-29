@@ -1,5 +1,6 @@
 // SmartFav Background - 后台脚本
 importScripts(
+  'constants.js',
   'classifier.js',
   'browser-bookmarks.js',
   'bookmark-backup.js',
@@ -7,12 +8,18 @@ importScripts(
   'i18n.js'
 );
 
-const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const {
+  TRASH_RETENTION_MS,
+  BROWSER_ACTIVITY_TTL_MS,
+  INTERNAL_REMOVE_TTL_MS,
+  getTrashExpireAt
+} = SmartFavConstants;
 const TRASH_CLEANUP_ALARM = 'smartfav-trash-cleanup';
-const INTERNAL_REMOVE_TTL_MS = 30 * 1000;
-const BROWSER_ACTIVITY_TTL_MS = 5 * 60 * 1000;
 const internallyRemovedBookmarkIds = new Map();
 const internallyMovedBookmarkIds = new Map();
+// 注意：以下两条队列依赖同一 service worker 实例内的 Promise 链，
+// worker 被回收后队列会重置。队列内的任务本身满足"失败即中止、不留半状态"，
+// 因此重置只会丢弃尚未开始的任务，不会留下半完成的书签结构。
 let bookmarkEventQueue = Promise.resolve();
 let bookmarkLayoutQueue = Promise.resolve();
 
@@ -301,11 +308,7 @@ function createTrashEntry(favorite, now = Date.now()) {
 
 async function cleanupRecentlyDeleted(now = Date.now()) {
   const { recentlyDeleted } = await getStoredState();
-  const retained = recentlyDeleted.filter((item) => {
-    const deletedAt = Number(item.deletedAt) || now;
-    const expiresAt = Number(item.expiresAt) || deletedAt + TRASH_RETENTION_MS;
-    return expiresAt > now;
-  });
+  const retained = recentlyDeleted.filter((item) => getTrashExpireAt(item, now) > now);
   const removed = recentlyDeleted.length - retained.length;
   if (removed) await setStoredState({ recentlyDeleted: retained });
   return { status: 'ok', removed, items: retained };

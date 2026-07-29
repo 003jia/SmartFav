@@ -26,8 +26,11 @@ const DEFAULT_SETTINGS = {
 };
 
 const THEME_STYLES = ['glass', 'white', 'gray', 'black', 'parchment'];
-const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const BROWSER_ACTIVITY_TTL_MS = 5 * 60 * 1000;
+const {
+  TRASH_RETENTION_MS,
+  BROWSER_ACTIVITY_TTL_MS,
+  getTrashExpireAt
+} = SmartFavConstants;
 const isExtension = typeof chrome !== 'undefined' && Boolean(chrome.storage && chrome.tabs);
 const previewState = {
   settings: DEFAULT_SETTINGS,
@@ -1481,10 +1484,7 @@ async function cleanupRecentlyDeletedItems() {
   const result = await storageGet(['recentlyDeleted']);
   const items = Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : [];
   const now = Date.now();
-  const retained = items.filter((item) => {
-    const deletedAt = Number(item.deletedAt) || now;
-    return (Number(item.expiresAt) || deletedAt + TRASH_RETENTION_MS) > now;
-  });
+  const retained = items.filter((item) => getTrashExpireAt(item, now) > now);
   if (retained.length !== items.length) {
     await storageSet({ recentlyDeleted: retained });
   }
@@ -1505,8 +1505,7 @@ async function getRecentlyDeletedItems() {
 
 function renderTrashRow(item) {
   const title = item.title || item.url || t('untitledPage');
-  const expiresAt = Number(item.expiresAt)
-    || (Number(item.deletedAt) || Date.now()) + TRASH_RETENTION_MS;
+  const expiresAt = getTrashExpireAt(item);
   const days = Math.max(1, Math.ceil((expiresAt - Date.now()) / (24 * 60 * 60 * 1000)));
   return `
     <article class="trash-row">

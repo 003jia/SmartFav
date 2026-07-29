@@ -5,8 +5,8 @@
 Browser verification at the native 360 × 560 popup size confirmed that the
 My Favorites and Category Folders views both render a content-level back
 button directly beneath the toolbar header, at x 14 and y 61, with no
-horizontal overflow. The current repository screenshot is
-`docs/smartfav-popup.png`.
+horizontal overflow. Verification screenshots were reviewed locally and are
+intentionally excluded from the public repository.
 
 The appearance controls resized the rendered document and app shell from
 360 × 560 to 440 × 480 in real time; the settings view retained zero
@@ -43,12 +43,9 @@ current webpage visibly exposed outside all four corners.
 
 Final verification evidence:
 
-- desktop collection view, 1280 x 800:
-  `/Users/jiayancheng/Documents/SmartFav-main/audit/15-floating-home.png`
-- desktop settings view, 1280 x 800:
-  `/Users/jiayancheng/Documents/SmartFav-main/audit/16-floating-settings.png`
-- narrow viewport, 390 x 844:
-  `/Users/jiayancheng/Documents/SmartFav-main/audit/17-floating-mobile.png`
+- desktop collection view at 1280 x 800
+- desktop settings view at 1280 x 800
+- narrow viewport at 390 x 844
 - desktop panel bounds: x 908, y 12, width 360, height 416
 - desktop settings bounds: x 908, y 12, width 360, height 538
 - narrow panel bounds: x 12, y 12, width 351, height 416
@@ -87,13 +84,8 @@ backdrop filter. The embedded default glass theme uses translucent shell and
 surface tokens, so the outer host blurs the real webpage rather than trying to
 simulate glass inside an opaque extension canvas.
 
-source visual truth path: `/Users/jiayancheng/Documents/SmartFav-main/audit/reference-browser-popup.png`
-
-implementation screenshot paths:
-
-- default glass collection view: `/Users/jiayancheng/Documents/SmartFav-main/audit/12-theme-glass-default.png`
-- black compact settings: `/Users/jiayancheng/Documents/SmartFav-main/audit/13-theme-settings-black.png`
-- glass appearance settings: `/Users/jiayancheng/Documents/SmartFav-main/audit/14-appearance-settings-glass.png`
+The source reference and implementation screenshots were reviewed locally and
+are intentionally excluded from the public repository.
 
 viewport: 348 px wide; default collection view 411 CSS px tall; compact settings viewport 540 CSS px tall
 
@@ -165,6 +157,6 @@ P3 follow-up: the native checkbox is visually squarer than the reference extensi
 - Version 1.4.4 removes the remaining visible popup-canvas strip below the rounded shell by reducing body padding to 1 px, making the glass-theme canvas transparent, and disabling its outer shadow. The shell remains clipped to an 18 px radius and expands to 358 px within the 360 px popup.
 - Version 1.4.5 applies the 18 px radius to the root `html` canvas, `body`, and `.app-shell`, removes body padding entirely, and adds `overflow: hidden`, rounded `clip-path`, and paint containment so the extension document itself is clipped at all four corners.
 - Version 1.5.0 moves the compact interface out of the browser-owned action popup and into a page-injected floating panel. The toolbar action toggles an isolated extension iframe at the page's top-right, with an 18 px clip, independent close control, dynamic height messages, and webpage content visible outside every corner.
-- Post-fix evidence: `audit/12-theme-glass-default.png`, `audit/13-theme-settings-black.png`, and `audit/14-appearance-settings-glass.png`, with the default view visually compared against `audit/reference-browser-popup-348.png`.
+- Post-fix visual evidence was reviewed locally and is intentionally excluded from the public repository.
 
 final result: passed

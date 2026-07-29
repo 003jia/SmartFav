@@ -24,6 +24,7 @@ const bookmarkBackup = require(path.join(extensionRoot, 'bookmark-backup.js'));
 const aiClient = require(path.join(extensionRoot, 'ai-client.js'));
 const aiKeywordSuggestions = require(path.join(extensionRoot, 'ai-keyword-suggestions.js'));
 const orderUtils = require(path.join(extensionRoot, 'order-utils.js'));
+const constants = require(path.join(extensionRoot, 'constants.js'));
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
@@ -153,7 +154,9 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /message\.type === 'getRecentlyDeleted'/);
   assert.match(backgroundJs, /message\.type === 'restoreDeletedFavorite'/);
   assert.match(backgroundJs, /message\.type === 'permanentlyDeleteFavorite'/);
-  assert.match(backgroundJs, /TRASH_RETENTION_MS = 7 \* 24 \* 60 \* 60 \* 1000/);
+  assert.equal(constants.TRASH_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
+  assert.match(backgroundJs, /importScripts\([^)]*constants\.js/);
+  assert.match(popupHtml, /<script src="constants\.js/);
   assert.match(backgroundJs, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
   assert.match(popupJs, /type:\s*'reclassifyFavorites'/);
@@ -300,7 +303,8 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /data-custom-background="true"/);
   assert.match(popupCss, /\.home-navigation-item\s*\{[^}]*min-height:\s*54px;/s);
   assert.match(popupCss, /--shadow:\s*none/);
-  assert.match(popupCss, /blur\(18px\)\s+saturate\(135%\)/);
+  assert.match(popupCss, /--panel-backdrop-filter:\s*blur\(14px\)\s+saturate\(140%\)/);
+  assert.match(popupCss, /backdrop-filter:\s*var\(--panel-backdrop-filter\)/);
   assert.match(
     popupCss,
     /\.button-primary:hover:not\(:disabled\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 999px rgba\(0,\s*0,\s*0,\s*0\.12\);/s
@@ -311,7 +315,10 @@ function verifyManifestAndLocales() {
   );
   assert.doesNotMatch(popupCss, /body::before/);
   assert.doesNotMatch(popupCss, /body::after/);
-  assert.doesNotMatch(popupCss, /\.app-shell::before/);
+  // 玻璃主题会用 .app-shell::before 铺一层光泽；该伪元素必须限定在玻璃主题下，
+  // 不允许出现无条件的全局遮罩层。
+  assert.doesNotMatch(popupCss, /(?<!\[data-theme="glass"\] )\.app-shell::before/);
+  assert.match(popupCss, /\[data-theme="glass"\] \.app-shell::before/);
   assert.doesNotMatch(popupCss, /@media\s*\(max-width:\s*346px\)[\s\S]*body\s*\{\s*width:\s*100vw/);
 
   const htmlKeys = [...popupHtml.matchAll(/data-i18n(?:-[\w-]+)?="([^"]+)"/g)]
@@ -1656,6 +1663,7 @@ function createBackgroundHarness(
     SmartFavBackup: bookmarkBackup,
     SmartFavOrder: orderUtils,
     SmartFavI18n: i18n,
+    SmartFavConstants: constants,
     importScripts() {},
     console: {
       log() {},

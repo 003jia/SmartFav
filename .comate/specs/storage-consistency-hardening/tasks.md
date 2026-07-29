@@ -4,7 +4,7 @@
 > 修复范围：P0（2 条）+ P1（4 条）+ P2（4 条）+ P3（最小范围）。
 > 原则：每个任务结束后代码都处于可运行状态；改动大的任务（Task 5）前后各跑一次验证。
 
-- [ ] Task 1: 建立回溯基线
+- [x] Task 1: 建立回溯基线
     - 1.1: 在项目根执行 `git init`
     - 1.2: 创建 `.gitignore`，排除 `.DS_Store`、`dist/`、`audit/` 下的大体积图片
     - 1.3: 提交基线快照 `chore: baseline v1.14.2 before consistency hardening`
