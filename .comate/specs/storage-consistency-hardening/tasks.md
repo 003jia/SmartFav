@@ -57,7 +57,7 @@
     - 7.5: `i18n.js` 更新背景图体积超限文案中的数值
     - 7.6: 跑验证脚本
 
-- [ ] Task 8: CSP 声明与死代码清理
+- [x] Task 8: CSP 声明与死代码清理
     - 8.1: `manifest.json` 增加 `content_security_policy.extension_pages`
     - 8.2: 再次确认 `styles/options.css` 无任何引用后删除
     - 8.3: 保留 `options.js` 与 `options.html`（扩展选项入口落地页，删除会导致入口失效）

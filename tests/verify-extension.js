@@ -1539,7 +1539,8 @@ function createBackgroundHarness(
   initialFavorites = [],
   initialRecentlyDeleted = [],
   initialRestorePoints = [],
-  initialFavoriteOrder = {}
+  initialFavoriteOrder = {},
+  options = {}
 ) {
   const bookmarks = createMockBookmarks();
   const state = {
@@ -1551,6 +1552,7 @@ function createBackgroundHarness(
     pendingBrowserActivity: null
   };
   const listeners = {};
+  const sessionState = {};
   const alarmSchedules = [];
   const notifications = [];
   const errors = [];
@@ -1654,7 +1656,25 @@ function createBackgroundHarness(
           callback(Object.fromEntries(requested.map((key) => [key, state[key]])));
         },
         set(values, callback) {
+          // storageWriteError 用于模拟配额超限：回调照常触发，但置位 lastError。
+          if (options.storageWriteError) {
+            chromeMock.runtime.lastError = { message: options.storageWriteError };
+            if (callback) callback();
+            chromeMock.runtime.lastError = null;
+            return;
+          }
           Object.assign(state, values);
+          if (callback) callback();
+        }
+      },
+      // session 区：内部书签操作标记的权威存储，worker 回收后仍然有效。
+      session: {
+        get(keys, callback) {
+          const requested = Array.isArray(keys) ? keys : Object.keys(keys || {});
+          callback(Object.fromEntries(requested.map((key) => [key, sessionState[key]])));
+        },
+        set(values, callback) {
+          Object.assign(sessionState, values);
           if (callback) callback();
         }
       }
@@ -1680,6 +1700,7 @@ function createBackgroundHarness(
   return {
     bookmarks,
     state,
+    sessionState,
     listeners,
     alarmSchedules,
     notifications,
@@ -1745,6 +1766,186 @@ async function sendBackgroundMessage(harness, message) {
     const keepsChannelOpen = harness.listeners.onMessage(message, {}, resolve);
     assert.equal(keepsChannelOpen, true);
   });
+}
+
+async function verifySaveFavoriteConsistency() {
+  const enDefaults = classifier.getDefaults('en');
+  const baseSettings = {
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: false,
+    bookmarkWriteMode: 'overwrite',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: false
+  };
+
+  // 并发保存两条收藏：布局锁必须把两次读-改-写串行化，后写不能覆盖先写。
+  const lockHarness = createBackgroundHarness({ ...baseSettings });
+  const [firstResponse, secondResponse] = await Promise.all([
+    sendBackgroundMessage(lockHarness, {
+      type: 'saveFavorite',
+      favorite: {
+        title: 'Concurrent one',
+        url: 'https://concurrent.example.com/one',
+        category: 'Tools',
+        createdAt: 1
+      }
+    }),
+    sendBackgroundMessage(lockHarness, {
+      type: 'saveFavorite',
+      favorite: {
+        title: 'Concurrent two',
+        url: 'https://concurrent.example.com/two',
+        category: 'Tools',
+        createdAt: 2
+      }
+    })
+  ]);
+  assert.equal(firstResponse.status, 'ok');
+  assert.equal(secondResponse.status, 'ok');
+  assert.equal(lockHarness.state.favorites.length, 2);
+  assert.deepEqual(
+    [...lockHarness.state.favorites].map((item) => item.url).sort(),
+    ['https://concurrent.example.com/one', 'https://concurrent.example.com/two']
+  );
+
+  // 同一网址重复保存只保留一条，且是最新的那条。
+  const dedupeHarness = createBackgroundHarness({ ...baseSettings });
+  await sendBackgroundMessage(dedupeHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Old title', url: 'https://dedupe.example.com/', category: 'Tools' }
+  });
+  await sendBackgroundMessage(dedupeHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'New title', url: 'https://dedupe.example.com/', category: 'Learning' }
+  });
+  assert.equal(dedupeHarness.state.favorites.length, 1);
+  assert.equal(dedupeHarness.state.favorites[0].title, 'New title');
+  assert.equal(dedupeHarness.state.favorites[0].category, 'Learning');
+
+  // 域名学习提案随保存一起落盘，settings 与 favorites 在同一次写入中提交。
+  const learningHarness = createBackgroundHarness({ ...baseSettings });
+  const learningResponse = await sendBackgroundMessage(learningHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Learned', url: 'https://learned.example.com/a', category: 'Learning' },
+    settingsPatch: { ...baseSettings, bookmarkWriteMode: 'add' }
+  });
+  assert.equal(learningResponse.status, 'ok');
+  assert.equal(learningHarness.state.settings.bookmarkWriteMode, 'add');
+  assert.equal(learningHarness.state.favorites.length, 1);
+
+  // 开启同步时，书签写入必须经过后台的受管 API，并把结果回传给 popup。
+  const syncHarness = createBackgroundHarness({
+    ...baseSettings,
+    browserBookmarksEnabled: true
+  });
+  const syncResponse = await sendBackgroundMessage(syncHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Synced', url: 'https://synced.example.com/a', category: 'Tools' }
+  });
+  assert.equal(syncResponse.status, 'ok');
+  assert.notEqual(syncResponse.bookmark.status, 'disabled');
+  const syncedNodes = [...syncHarness.bookmarks.nodes.values()]
+    .filter((node) => node.url === 'https://synced.example.com/a');
+  assert.equal(syncedNodes.length, 1);
+
+  // 关闭同步时不触碰浏览器收藏夹。
+  const disabledHarness = createBackgroundHarness({ ...baseSettings });
+  const disabledResponse = await sendBackgroundMessage(disabledHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Local only', url: 'https://local-only.example.com/', category: 'Tools' }
+  });
+  assert.equal(disabledResponse.bookmark.status, 'disabled');
+  assert.equal(
+    [...disabledHarness.bookmarks.nodes.values()]
+      .filter((node) => node.url === 'https://local-only.example.com/').length,
+    0
+  );
+
+  // 缺少 url 的收藏请求必须被拒绝，而不是写入一条脏数据。
+  const invalidHarness = createBackgroundHarness({ ...baseSettings });
+  const invalidResponse = await sendBackgroundMessage(invalidHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'No url' }
+  });
+  assert.equal(invalidResponse.status, 'error');
+  assert.equal(invalidHarness.state.favorites.length, 0);
+}
+
+async function verifyStorageWriteFailures() {
+  const enDefaults = classifier.getDefaults('en');
+  const baseSettings = {
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: false,
+    bookmarkWriteMode: 'overwrite',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: false
+  };
+
+  // 配额超限：set 回调照常触发但 lastError 被置位，写入必须报错而不是静默成功。
+  const failingHarness = createBackgroundHarness(
+    { ...baseSettings },
+    [],
+    [],
+    [],
+    {},
+    { storageWriteError: 'QUOTA_BYTES quota exceeded' }
+  );
+  const saveResponse = await sendBackgroundMessage(failingHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Quota', url: 'https://quota.example.com/', category: 'Tools' }
+  });
+  assert.equal(saveResponse.status, 'error');
+  assert.match(saveResponse.message, /quota/i);
+  assert.equal(failingHarness.state.favorites.length, 0);
+
+  // 删除路径同样不能把失败当成功。
+  const deleteHarness = createBackgroundHarness(
+    { ...baseSettings },
+    [{ title: 'Doomed', url: 'https://doomed.example.com/', category: 'Tools' }],
+    [],
+    [],
+    {},
+    { storageWriteError: 'QUOTA_BYTES quota exceeded' }
+  );
+  const deleteResponse = await sendBackgroundMessage(deleteHarness, {
+    type: 'deleteFavorite',
+    url: 'https://doomed.example.com/'
+  });
+  assert.equal(deleteResponse.status, 'error');
+  assert.equal(deleteHarness.state.favorites.length, 1);
+  assert.equal(deleteHarness.state.recentlyDeleted.length, 0);
+}
+
+async function verifyInternalMarkPersistence() {
+  const enDefaults = classifier.getDefaults('en');
+  const harness = createBackgroundHarness({
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: true,
+    bookmarkWriteMode: 'overwrite',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: true
+  });
+
+  // SmartFav 自己发起的删除会把内部标记写入 storage.session，
+  // 这样 worker 被回收重启后仍能识别出"这是我自己的操作"。
+  await sendBackgroundMessage(harness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Marked', url: 'https://marked.example.com/a', category: 'Tools' }
+  });
+  await sendBackgroundMessage(harness, {
+    type: 'deleteFavorite',
+    url: 'https://marked.example.com/a'
+  });
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(harness.sessionState, 'internalBookmarkRemovals'),
+    'internal removal marks should be persisted into storage.session'
+  );
 }
 
 async function verifyBackgroundBookmarkFlows() {
@@ -2579,6 +2780,9 @@ async function main() {
   await verifyOrganizeBookmarks();
   await verifyBookmarkRestorePoints();
   await verifyBackgroundBookmarkFlows();
+  await verifySaveFavoriteConsistency();
+  await verifyStorageWriteFailures();
+  await verifyInternalMarkPersistence();
   console.log('SmartFav extension verification passed.');
 }
 
