@@ -272,18 +272,8 @@ function getStoredState() {
   });
 }
 
-function setStoredFavorites(favorites) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ favorites }, resolve);
-  });
-}
-
-function setStoredState(values) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set(values, resolve);
-  });
-}
-
+// 所有写入都必须检查 lastError：storage.local 配额超限或存储损坏时
+// set() 的回调仍会触发，若不检查会把失败当成成功，UI 提示成功而数据未落盘。
 function setStoredStateChecked(values) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.set(values, () => {
@@ -295,6 +285,14 @@ function setStoredStateChecked(values) {
       resolve();
     });
   });
+}
+
+function setStoredFavorites(favorites) {
+  return setStoredStateChecked({ favorites });
+}
+
+function setStoredState(values) {
+  return setStoredStateChecked(values);
 }
 
 function createTrashEntry(favorite, now = Date.now()) {
@@ -1060,8 +1058,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     recoverManagedFavorites()
       .then((result) => sendResponse(result.favorites || []))
       .catch(() => {
+        // 降级读取：失败时回传空数组，避免把 undefined 交给 popup。
         chrome.storage.local.get(['favorites'], (result) => {
-          sendResponse(result.favorites || []);
+          const runtimeError = chrome.runtime && chrome.runtime.lastError;
+          if (runtimeError || !result) {
+            sendResponse([]);
+            return;
+          }
+          sendResponse(Array.isArray(result.favorites) ? result.favorites : []);
         });
       });
     return true;

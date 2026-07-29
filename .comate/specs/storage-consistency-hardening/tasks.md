@@ -10,7 +10,7 @@
     - 1.3: 提交基线快照 `chore: baseline v1.14.2 before consistency hardening`
     - 1.4: 记录基线 commit hash，写入后续的修复过程文档
 
-- [ ] Task 2: 抽取 constants.js 消除常量与逻辑双写
+- [x] Task 2: 抽取 constants.js 消除常量与逻辑双写
     - 2.1: 新增 `smartFav智能收藏夹/constants.js`，沿用 IIFE + globalScope + module.exports 双导出模式
     - 2.2: 导出 `TRASH_RETENTION_MS`、`BROWSER_ACTIVITY_TTL_MS`、`INTERNAL_REMOVE_TTL_MS`
     - 2.3: 导出工具函数 `getTrashExpireAt(item, now)`，统一过期时间计算
