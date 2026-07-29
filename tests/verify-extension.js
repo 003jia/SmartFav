@@ -157,6 +157,10 @@ function verifyManifestAndLocales() {
   assert.equal(constants.TRASH_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
   assert.match(backgroundJs, /importScripts\([^)]*constants\.js/);
   assert.match(popupHtml, /<script src="constants\.js/);
+  assert.match(
+    manifest.content_security_policy.extension_pages,
+    /script-src 'self'/
+  );
   assert.match(backgroundJs, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
   assert.match(popupJs, /type:\s*'reclassifyFavorites'/);

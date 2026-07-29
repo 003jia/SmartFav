@@ -41,7 +41,7 @@
     - 5.6: 保留 `isExtension === false` 的本地写入分支，供网页调试模式使用
     - 5.7: 跑验证脚本，重点确认收藏保存与浏览器写回相关用例
 
-- [ ] Task 6: AI 请求增加超时与中断
+- [x] Task 6: AI 请求增加超时与中断
     - 6.1: `ai-client.js` 新增 `REQUEST_TIMEOUT_MS = 30000`
     - 6.2: `call()` 中引入 `AbortController`，超时 abort，`finally` 中 `clearTimeout`
     - 6.3: 捕获 `AbortError` 并转换为中英双语超时错误信息
@@ -49,7 +49,7 @@
     - 6.5: 确认超时错误落入既有失败分支：批量建议整批失败时界面不变，收藏分类回退本地规则
     - 6.6: 跑验证脚本中的 AI 协议用例（该用例已 stub fetch，需确认 stub 与 signal 参数兼容）
 
-- [ ] Task 7: 背景图配额治理
+- [x] Task 7: 背景图配额治理
     - 7.1: `readBackgroundImage` 上限从 3MB 降到 800KB，并在 `readAsDataURL` 完成后校验 base64 实际长度
     - 7.2: 背景图从 `settings` 拆出为独立 storage key `customBackgroundImage`
     - 7.3: 更新读取、预览、清除、应用外观四处的引用
