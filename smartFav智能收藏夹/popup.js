@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS = {
 };
 
 const THEME_STYLES = ['glass', 'white', 'gray', 'black', 'parchment'];
+// 背景图以 base64 存在 settings 中，与收藏、布局还原点共用 storage.local 配额，
+// 因此限制在 800 KB 以内，避免挤占用户数据空间导致写入失败。
+const MAX_BACKGROUND_IMAGE_BYTES = 800 * 1024;
 const {
   TRASH_RETENTION_MS,
   BROWSER_ACTIVITY_TTL_MS,
@@ -2557,12 +2560,25 @@ function readBackgroundImage(file) {
       reject(new Error(t('backgroundImageTypeError')));
       return;
     }
-    if (file.size > 3 * 1024 * 1024) {
+    if (file.size > MAX_BACKGROUND_IMAGE_BYTES) {
       reject(new Error(t('backgroundImageTooLarge')));
       return;
     }
     const reader = new FileReader();
-    reader.addEventListener('load', () => resolve(String(reader.result || '')), { once: true });
+    reader.addEventListener(
+      'load',
+      () => {
+        const dataUrl = String(reader.result || '');
+        // base64 编码后体积约为原文件的 4/3，settings 与收藏、还原点共用
+        // storage.local 配额，因此按编码后的实际长度再校验一次。
+        if (dataUrl.length > MAX_BACKGROUND_IMAGE_BYTES * 2) {
+          reject(new Error(t('backgroundImageTooLarge')));
+          return;
+        }
+        resolve(dataUrl);
+      },
+      { once: true }
+    );
     reader.addEventListener('error', () => reject(new Error(t('backgroundImageReadFailed'))), { once: true });
     reader.readAsDataURL(file);
   });
