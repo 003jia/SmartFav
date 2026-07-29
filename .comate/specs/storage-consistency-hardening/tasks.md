@@ -19,7 +19,7 @@
     - 2.6: `popup.js:1486`、`1508-1509` 与 `background.js:302-312` 的过期时间表达式改为调用 `getTrashExpireAt`
     - 2.7: `node --check` 全部改动文件，跑 `node tests/verify-extension.js`
 
-- [ ] Task 3: storage 写入统一为带检查版本
+- [x] Task 3: storage 写入统一为带检查版本
     - 3.1: `background.js` 的 `setStoredFavorites`、`setStoredState` 改为检查 `chrome.runtime.lastError` 并在失败时 reject
     - 3.2: 逐一排查这两个函数的全部调用点，确认都处在已有 `.catch` 的链路中，缺失的补上
     - 3.3: `background.js:1060` 的 `getFavorites` 降级分支补 lastError 检查，失败回传空数组而非 undefined

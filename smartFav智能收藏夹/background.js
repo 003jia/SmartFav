@@ -23,6 +23,52 @@ const internallyMovedBookmarkIds = new Map();
 let bookmarkEventQueue = Promise.resolve();
 let bookmarkLayoutQueue = Promise.resolve();
 
+const INTERNAL_REMOVE_KEY = 'internalBookmarkRemovals';
+const INTERNAL_MOVE_KEY = 'internalBookmarkMoves';
+
+// MV3 的 service worker 空闲即被回收，纯内存标记会随之丢失，
+// 导致 SmartFav 自己发起的书签写入在 worker 重启后被误判为"用户在浏览器侧操作"。
+// 因此以 chrome.storage.session（随浏览器会话存活）作为权威来源，内存 Map 仅作一级缓存。
+function getSessionArea() {
+  const storage = chrome.storage;
+  if (!storage || !storage.session) return null;
+  return typeof storage.session.get === 'function' ? storage.session : null;
+}
+
+function readSessionMarks(key, cache) {
+  const area = getSessionArea();
+  if (!area) return Promise.resolve(cache);
+  return new Promise((resolve) => {
+    area.get([key], (result) => {
+      if (chrome.runtime && chrome.runtime.lastError) {
+        resolve(cache);
+        return;
+      }
+      const stored = result && result[key];
+      if (stored && typeof stored === 'object') {
+        Object.keys(stored).forEach((id) => {
+          const expiresAt = Number(stored[id]);
+          if (expiresAt && !cache.has(id)) cache.set(id, expiresAt);
+        });
+      }
+      resolve(cache);
+    });
+  });
+}
+
+function writeSessionMarks(key, cache) {
+  const area = getSessionArea();
+  if (!area || typeof area.set !== 'function') return;
+  const plain = {};
+  cache.forEach((expiresAt, id) => {
+    plain[id] = expiresAt;
+  });
+  area.set({ [key]: plain }, () => {
+    // 读取 lastError 避免未处理警告；会话标记丢失只会退化为内存态，不阻断主流程。
+    void (chrome.runtime && chrome.runtime.lastError);
+  });
+}
+
 function pruneInternalBookmarkRemovals(now = Date.now()) {
   internallyRemovedBookmarkIds.forEach((expiresAt, id) => {
     if (expiresAt <= now) internallyRemovedBookmarkIds.delete(id);
@@ -32,13 +78,16 @@ function pruneInternalBookmarkRemovals(now = Date.now()) {
 function markInternalBookmarkRemoval(id) {
   pruneInternalBookmarkRemovals();
   internallyRemovedBookmarkIds.set(String(id), Date.now() + INTERNAL_REMOVE_TTL_MS);
+  writeSessionMarks(INTERNAL_REMOVE_KEY, internallyRemovedBookmarkIds);
 }
 
-function consumeInternalBookmarkRemoval(id) {
+async function consumeInternalBookmarkRemoval(id) {
+  await readSessionMarks(INTERNAL_REMOVE_KEY, internallyRemovedBookmarkIds);
   pruneInternalBookmarkRemovals();
   const normalizedId = String(id);
   const wasInternal = internallyRemovedBookmarkIds.has(normalizedId);
   internallyRemovedBookmarkIds.delete(normalizedId);
+  if (wasInternal) writeSessionMarks(INTERNAL_REMOVE_KEY, internallyRemovedBookmarkIds);
   return wasInternal;
 }
 
@@ -51,13 +100,16 @@ function pruneInternalBookmarkMoves(now = Date.now()) {
 function markInternalBookmarkMove(id) {
   pruneInternalBookmarkMoves();
   internallyMovedBookmarkIds.set(String(id), Date.now() + INTERNAL_REMOVE_TTL_MS);
+  writeSessionMarks(INTERNAL_MOVE_KEY, internallyMovedBookmarkIds);
 }
 
-function consumeInternalBookmarkMove(id) {
+async function consumeInternalBookmarkMove(id) {
+  await readSessionMarks(INTERNAL_MOVE_KEY, internallyMovedBookmarkIds);
   pruneInternalBookmarkMoves();
   const normalizedId = String(id);
   const wasInternal = internallyMovedBookmarkIds.has(normalizedId);
   internallyMovedBookmarkIds.delete(normalizedId);
+  if (wasInternal) writeSessionMarks(INTERNAL_MOVE_KEY, internallyMovedBookmarkIds);
   return wasInternal;
 }
 
@@ -906,7 +958,7 @@ chrome.bookmarks.onCreated.addListener((id, node) => {
 });
 
 async function handleBookmarkMoved(id, moveInfo) {
-  if (consumeInternalBookmarkMove(id)) return;
+  if (await consumeInternalBookmarkMove(id)) return;
   if (!chrome.bookmarks) return;
   if (
     moveInfo
@@ -983,7 +1035,7 @@ if (chrome.bookmarks.onMoved && typeof chrome.bookmarks.onMoved.addListener === 
 }
 
 async function handleBookmarkRemoved(id, removeInfo) {
-  if (consumeInternalBookmarkRemoval(id)) return;
+  if (await consumeInternalBookmarkRemoval(id)) return;
   const removedUrls = [...collectRemovedUrls(removeInfo && removeInfo.node)];
   if (!removedUrls.length || !chrome.bookmarks) return;
 

@@ -98,39 +98,39 @@ if (!isExtension) {
     previewState.favorites = [
       {
         title: detectedLanguage === 'zh_CN'
-          ? 'Comate 客户管理表'
-          : 'Comate customer dashboard',
-        url: 'https://ku.baidu-int.com/customer',
+          ? 'Nova 项目看板'
+          : 'Nova project dashboard',
+        url: 'https://projects.example.com/dashboard',
         category: customCategory,
         createdAt: Date.now() - 5 * 60000
       },
       {
         title: detectedLanguage === 'zh_CN'
-          ? 'Comate 智能云下单流程'
-          : 'Comate cloud ordering workflow',
-        url: 'https://ku.baidu-int.com/order',
+          ? 'Atlas 项目流程'
+          : 'Atlas project workflow',
+        url: 'https://workflow.example.com/process',
         category: customCategory,
         createdAt: Date.now() - 10 * 60000
       },
       {
-        title: 'comate.baidu.com/zh/management/home',
-        url: 'https://comate.baidu.com/zh/management/home',
+        title: 'Project documentation overview',
+        url: 'https://docs.example.com/project/overview',
         category: customCategory,
         createdAt: Date.now() - 15 * 60000
       },
       {
         title: detectedLanguage === 'zh_CN'
-          ? 'Comate 海外模型单价'
-          : 'Comate international model pricing',
-        url: 'https://comate.baidu.com/pricing',
+          ? 'Orion 产品说明'
+          : 'Orion product guide',
+        url: 'https://catalog.example.com/product-guide',
         category: customCategory,
         createdAt: Date.now() - 20 * 60000
       },
       {
         title: detectedLanguage === 'zh_CN'
-          ? 'Comate 试用客户跟进'
-          : 'Comate trial customer follow-up',
-        url: 'https://ku.baidu-int.com/follow-up',
+          ? '团队协作计划'
+          : 'Team collaboration plan',
+        url: 'https://planning.example.com/team',
         category: customCategory,
         createdAt: Date.now() - 25 * 60000
       },
@@ -2899,8 +2899,8 @@ function buildPreviewAIKeywordResponse(profiles) {
     Tools: ['collaborative design', 'productivity app'],
     学习: ['开发文档', '技术参考'],
     Learning: ['developer docs', 'technical reference'],
-    项目资料: ['客户管理', '项目流程'],
-    Projects: ['customer management', 'project workflow']
+    项目资料: ['团队协作', '项目流程'],
+    Projects: ['team collaboration', 'project workflow']
   };
   return JSON.stringify({
     categories: profiles.map((profile) => ({
