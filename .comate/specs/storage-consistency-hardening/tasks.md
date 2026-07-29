@@ -32,7 +32,7 @@
     - 4.4: 在 `bookmarkEventQueue` / `bookmarkLayoutQueue` 声明处加注释，说明跨 worker 重启不持久化的已知限制
     - 4.5: 跑验证脚本中的书签事件回流用例
 
-- [ ] Task 5: 收藏保存路径收敿到 background（核心改动）
+- [x] Task 5: 收藏保存路径收敿到 background（核心改动）
     - 5.1: `background.js` 新增 `saveFavoriteEntry(favorite, settingsPatch)`，全程置于 `withBookmarkLayoutLock` 内
     - 5.2: 该函数内用 `setStoredStateChecked` 写 favorites 与 settings，用 `getTrackedBookmarksApi()` 写浏览器书签
     - 5.3: 重写 `saveFavorite` 消息分支，改为调用 `saveFavoriteEntry` 并回传 `{ status, bookmark }`

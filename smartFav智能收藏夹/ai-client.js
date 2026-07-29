@@ -1,4 +1,7 @@
 (function attachAIClient(globalScope) {
+  // AI 请求超时：无超时的 fetch 在服务无响应时会让界面永久停在进行中状态。
+  const REQUEST_TIMEOUT_MS = 30000;
+
   const PROVIDERS = {
     ollama: {
       name: 'Ollama（本机免费）',
@@ -208,6 +211,30 @@
     };
   }
 
+  // 用 AbortController 给请求加超时上限。不做自动重试：
+  // 交互本身已经偏慢，重试只会让用户等更久，失败后调用方会回退到本地分类。
+  async function fetchWithTimeout(endpoint, options, isChinese) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller
+      ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+      : null;
+    try {
+      return await fetch(
+        endpoint,
+        controller ? { ...options, signal: controller.signal } : options
+      );
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error(isChinese
+          ? `AI 请求超时（${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒）`
+          : `AI request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s`);
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function readErrorDetail(response) {
     if (!response || typeof response.json !== 'function') return '';
     try {
@@ -244,7 +271,7 @@
       apiEndpoint: endpoint,
       model
     });
-    const response = await fetch(request.endpoint, request.options);
+    const response = await fetchWithTimeout(request.endpoint, request.options, isChinese);
 
     if (!response.ok) {
       const detail = await readErrorDetail(response);
