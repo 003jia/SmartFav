@@ -69,13 +69,13 @@
     - 9.3: 将两个新用例接入 `verify-extension.js` 的执行序列
     - 9.4: 确认 mock 的 `chrome.storage.session` 支持已就位
 
-- [ ] Task 10: 全量验证
+- [x] Task 10: 全量验证
     - 10.1: 对全部 10 个 js 文件执行 `node --check`（含 README 未列出的 ai-client.js、bookmark-backup.js、i18n.js、constants.js）
     - 10.2: 跑 `node tests/verify-extension.js`，要求全绿
     - 10.3: 更新 README「开发与验证」章节的检查命令清单，补齐漏检文件
     - 10.4: 记录验证输出，供修复过程文档引用
 
-- [ ] Task 11: 产出修复过程与回溯文档
+- [x] Task 11: 产出修复过程与回溯文档
     - 11.1: 汇总每条问题的修复位置、改动前后行为差异
     - 11.2: 列出全部新增、修改、删除的文件清单
     - 11.3: 写明三级回溯方式：单文件回退、整次修复回退、回到基线 commit
