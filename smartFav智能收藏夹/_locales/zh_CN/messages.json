@@ -1,0 +1,11 @@
+{
+  "extensionName": {
+    "message": "SmartFav - 智能收藏夹"
+  },
+  "extensionDescription": {
+    "message": "本地关键词优先、AI 可选增强的智能网页收藏夹"
+  },
+  "actionTitle": {
+    "message": "收藏当前网页"
+  }
+}

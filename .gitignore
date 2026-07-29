@@ -1,0 +1,9 @@
+.DS_Store
+**/.DS_Store
+node_modules/
+*.log
+.playwright-cli/
+audit/
+
+# 构建产物（正式版本发布到 GitHub Releases，不入库）
+dist/

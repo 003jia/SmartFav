@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartFav Microsoft Edge Store Screenshot</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #eef3ff;
+      color: #172034;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 1280px;
+      height: 800px;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      position: relative;
+      background:
+        radial-gradient(circle at 18% 7%, rgba(132, 169, 255, 0.5), transparent 34%),
+        radial-gradient(circle at 73% 100%, rgba(82, 217, 187, 0.24), transparent 34%),
+        linear-gradient(135deg, #f8faff 0%, #eaf1ff 52%, #f4fbff 100%);
+    }
+
+    body::before,
+    body::after {
+      position: absolute;
+      border-radius: 999px;
+      content: "";
+      filter: blur(1px);
+      pointer-events: none;
+    }
+
+    body::before {
+      top: -130px;
+      right: -90px;
+      width: 440px;
+      height: 440px;
+      border: 1px solid rgba(70, 111, 237, 0.22);
+      background: rgba(255, 255, 255, 0.28);
+    }
+
+    body::after {
+      bottom: -210px;
+      left: 320px;
+      width: 470px;
+      height: 470px;
+      border: 1px solid rgba(44, 196, 157, 0.2);
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .frame {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 568px;
+      gap: 44px;
+      width: 100%;
+      height: 100%;
+      padding: 66px 68px;
+    }
+
+    .copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-width: 0;
+      padding: 6px 0 4px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 46px;
+    }
+
+    .brand img {
+      width: 64px;
+      height: 64px;
+      border-radius: 15px;
+      box-shadow: 0 14px 28px rgba(37, 91, 230, 0.25);
+    }
+
+    .brand-name {
+      font-size: 32px;
+      font-weight: 760;
+      letter-spacing: -0.8px;
+    }
+
+    h1 {
+      max-width: 590px;
+      margin: 0;
+      font-size: 68px;
+      font-weight: 780;
+      letter-spacing: -3.2px;
+      line-height: 1.04;
+    }
+
+    .lead {
+      max-width: 590px;
+      margin: 24px 0 34px;
+      color: #55627b;
+      font-size: 24px;
+      font-weight: 520;
+      line-height: 1.5;
+    }
+
+    .features {
+      display: grid;
+      gap: 17px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .features li {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      font-size: 20px;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    .features li::before {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      border-radius: 50%;
+      background: #2459e8;
+      color: white;
+      content: "✓";
+      font-size: 16px;
+      font-weight: 800;
+      box-shadow: 0 7px 16px rgba(36, 89, 232, 0.22);
+    }
+
+    .edge-label {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      gap: 9px;
+      margin-top: 42px;
+      padding: 11px 16px;
+      border: 1px solid rgba(36, 89, 232, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.64);
+      color: #365078;
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: 0.1px;
+      backdrop-filter: blur(14px);
+    }
+
+    .edge-label::before {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #2cc49d;
+      content: "";
+      box-shadow: 0 0 0 5px rgba(44, 196, 157, 0.14);
+    }
+
+    .product {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .product::before {
+      position: absolute;
+      inset: 13px 3px 3px 13px;
+      border-radius: 38px;
+      background:
+        linear-gradient(145deg, rgba(35, 85, 230, 0.2), rgba(51, 207, 176, 0.14)),
+        rgba(255, 255, 255, 0.56);
+      content: "";
+      filter: blur(0.2px);
+      box-shadow:
+        0 42px 80px rgba(46, 69, 122, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.86);
+      transform: rotate(1.8deg);
+    }
+
+    .product-shot {
+      position: relative;
+      width: 520px;
+      height: 600px;
+      border: 1px solid rgba(86, 104, 146, 0.2);
+      background: #f9fbff;
+      box-shadow:
+        0 30px 66px rgba(34, 57, 107, 0.22),
+        0 3px 8px rgba(39, 53, 82, 0.11);
+      object-fit: cover;
+    }
+
+    .lang {
+      display: none;
+    }
+
+    body[data-language="zh"] .lang-zh,
+    body[data-language="en"] .lang-en {
+      display: block;
+    }
+
+    body[data-language="zh"] .product-shot-en,
+    body[data-language="en"] .product-shot-zh {
+      display: none;
+    }
+  </style>
+</head>
+<body data-language="zh">
+  <main class="frame">
+    <section class="copy" aria-label="SmartFav product introduction">
+      <div class="brand">
+        <img src="../../smartFav智能收藏夹/icons/icon128.png" alt="">
+        <div class="brand-name">SmartFav</div>
+      </div>
+
+      <div class="lang lang-zh">
+        <h1>让收藏<br>自动归位</h1>
+        <p class="lead">本地规则优先，AI 按需增强。收藏、分类和浏览器同步，都集中在一个紧凑弹窗里。</p>
+        <ul class="features">
+          <li>一键分类当前网页</li>
+          <li>双向同步 Microsoft Edge 收藏夹</li>
+          <li>中英文、多主题与自定义规则</li>
+        </ul>
+        <div class="edge-label">适用于 Microsoft Edge</div>
+      </div>
+
+      <div class="lang lang-en">
+        <h1>Bookmarks,<br>organized.</h1>
+        <p class="lead">Local-first rules with optional AI assistance. Save, classify, and sync from one compact popup.</p>
+        <ul class="features">
+          <li>Categorize the current page in one click</li>
+          <li>Two-way sync with Microsoft Edge favorites</li>
+          <li>Bilingual UI, themes, and custom rules</li>
+        </ul>
+        <div class="edge-label">Built for Microsoft Edge</div>
+      </div>
+    </section>
+
+    <section class="product" aria-label="SmartFav extension interface">
+      <img class="product-shot product-shot-zh" src="source/popup-zh.png" alt="SmartFav Chinese popup">
+      <img class="product-shot product-shot-en" src="source/popup-en.png" alt="SmartFav English popup">
+    </section>
+  </main>
+
+  <script>
+    const language = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh";
+    document.body.dataset.language = language;
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+  </script>
+</body>
+</html>
