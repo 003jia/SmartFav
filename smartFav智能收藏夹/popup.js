@@ -134,6 +134,13 @@ if (!isExtension) {
       ...previewState.favorites
     ];
   }
+  if (previewParams.get('aiKeywordPreview') === 'success') {
+    previewState.settings = {
+      ...previewState.settings,
+      aiEnabled: true,
+      aiAutoClassify: false
+    };
+  }
   if (previewRestoreState === 'legacy') {
     previewState.bookmarkRestorePoints = [
       {
@@ -262,6 +269,7 @@ const elements = {
   bookmarkBackupStatus: document.getElementById('bookmarkBackupStatus'),
   compactNewCategory: document.getElementById('compactNewCategory'),
   compactAddCategoryBtn: document.getElementById('compactAddCategoryBtn'),
+  categoryKeywordAiAnalyzeBtn: document.getElementById('categoryKeywordAiAnalyzeBtn'),
   categoryRulesList: document.getElementById('categoryRulesList'),
   categorySettingsStatus: document.getElementById('categorySettingsStatus'),
   categorySaveBtn: document.getElementById('categorySaveBtn'),
@@ -290,6 +298,8 @@ let recommendedCategory = '';
 let currentPageLearningProposal = null;
 let pendingPageLearningUndo = null;
 let popupCloseTimer = null;
+let aiKeywordAnalysisInFlight = false;
+let categoryKeywordSuggestionCounts = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
   await recoverManagedBrowserFavorites();
@@ -2480,6 +2490,7 @@ function populateCategoryManager() {
     name: category,
     keywords: [...(mergedRules[category] || [])]
   }));
+  categoryKeywordSuggestionCounts = {};
   elements.compactNewCategory.value = '';
   renderCategoryRules();
   elements.categorySettingsStatus.textContent = '';
@@ -2861,11 +2872,143 @@ function updateCategoryKeywordsFromInput(input, { format = false } = {}) {
   showCategorySettingsStatus(t('keywordsNormalized'), 'success');
 }
 
+function syncCategoryDraftFromInputs() {
+  elements.categoryRulesList
+    .querySelectorAll('.category-keywords-input')
+    .forEach((input) => updateCategoryKeywordsFromInput(input));
+}
+
+function buildAIKeywordPrompt(profiles) {
+  const folders = profiles.map((profile) => ({
+    category: profile.category,
+    existingKeywords: profile.existingKeywords,
+    totalFavorites: profile.totalFavorites,
+    favorites: profile.samples
+  }));
+  return t('aiKeywordPrompt', {
+    folders: JSON.stringify(folders, null, 2)
+  });
+}
+
+function buildPreviewAIKeywordResponse(profiles) {
+  const keywordMap = {
+    视频: ['影音平台', '在线直播'],
+    Video: ['media platform', 'online streaming'],
+    编程: ['开源项目', '代码协作'],
+    Programming: ['open source', 'code collaboration'],
+    工具: ['协作设计', '生产力应用'],
+    Tools: ['collaborative design', 'productivity app'],
+    学习: ['开发文档', '技术参考'],
+    Learning: ['developer docs', 'technical reference'],
+    项目资料: ['客户管理', '项目流程'],
+    Projects: ['customer management', 'project workflow']
+  };
+  return JSON.stringify({
+    categories: profiles.map((profile) => ({
+      category: profile.category,
+      keywords: keywordMap[profile.category] || []
+    }))
+  });
+}
+
+function requestAIKeywordSuggestions(profiles) {
+  if (
+    !isExtension
+    && new URLSearchParams(window.location.search).get('aiKeywordPreview') === 'success'
+  ) {
+    return Promise.resolve(buildPreviewAIKeywordResponse(profiles));
+  }
+  return SmartFavAI.call(buildAIKeywordPrompt(profiles), currentSettings);
+}
+
+async function analyzeCategoryKeywordsWithAI() {
+  if (aiKeywordAnalysisInFlight) return;
+  if (!currentSettings.aiEnabled) {
+    showCategorySettingsStatus(t('aiKeywordNeedsEnabled'), 'error');
+    return;
+  }
+  const provider = SmartFavAI.getProvider(currentSettings.apiProvider);
+  if (provider.requiresKey && !String(currentSettings.apiKey || '').trim()) {
+    showCategorySettingsStatus(t('apiKeyRequired'), 'error');
+    return;
+  }
+  if (!String(currentSettings.model || provider.model || '').trim()) {
+    showCategorySettingsStatus(t('modelRequired'), 'error');
+    return;
+  }
+
+  syncCategoryDraftFromInputs();
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const profiles = SmartFavAIKeywordSuggestions.buildCategoryProfiles(
+    categoryDraft,
+    favorites
+  );
+  if (!profiles.length) {
+    showCategorySettingsStatus(t('aiKeywordNoFavorites'), 'error');
+    return;
+  }
+  const batches = SmartFavAIKeywordSuggestions.createBatches(profiles);
+  const suggestions = [];
+  aiKeywordAnalysisInFlight = true;
+  elements.categoryKeywordAiAnalyzeBtn.disabled = true;
+  elements.categorySaveBtn.disabled = true;
+  elements.categoryKeywordAiAnalyzeBtn.textContent = t('optimizing');
+
+  try {
+    for (let index = 0; index < batches.length; index += 1) {
+      const batch = batches[index];
+      showCategorySettingsStatus(t('aiKeywordProgress', {
+        current: index + 1,
+        total: batches.length
+      }), '');
+      const response = await requestAIKeywordSuggestions(batch);
+      suggestions.push(...SmartFavAIKeywordSuggestions.parseKeywordSuggestions(
+        response,
+        batch.map((profile) => profile.category)
+      ));
+    }
+
+    syncCategoryDraftFromInputs();
+    const merged = SmartFavAIKeywordSuggestions.mergeIntoCategoryDraft(
+      categoryDraft,
+      suggestions
+    );
+    if (!merged.addedCount) {
+      showCategorySettingsStatus(t('aiKeywordNoNew'), 'success');
+      return;
+    }
+    categoryDraft = merged.draft;
+    categoryKeywordSuggestionCounts = merged.addedByCategory;
+    renderCategoryRules();
+    showCategorySettingsStatus(t('aiKeywordFilled', {
+      folders: merged.updatedCategories,
+      count: merged.addedCount
+    }), 'success');
+  } catch (error) {
+    showCategorySettingsStatus(t('aiKeywordFailed', {
+      message: error.message
+    }), 'error');
+  } finally {
+    aiKeywordAnalysisInFlight = false;
+    elements.categoryKeywordAiAnalyzeBtn.disabled = false;
+    elements.categorySaveBtn.disabled = false;
+    elements.categoryKeywordAiAnalyzeBtn.textContent = t('aiKeywordAnalyze');
+  }
+}
+
 function renderCategoryRules() {
-  elements.categoryRulesList.innerHTML = categoryDraft.map((item, index) => `
-    <div class="category-rule-item" data-category-index="${index}">
+  elements.categoryRulesList.innerHTML = categoryDraft.map((item, index) => {
+    const suggestionCount = Number(categoryKeywordSuggestionCounts[item.name]) || 0;
+    return `
+    <div class="category-rule-item${suggestionCount ? ' has-ai-suggestions' : ''}" data-category-index="${index}">
       <div class="category-rule-header">
-        <span class="category-rule-name">${escapeHtml(item.name)}</span>
+        <span class="category-rule-title">
+          <span class="category-rule-name">${escapeHtml(item.name)}</span>
+          ${suggestionCount
+    ? `<span class="category-rule-ai-badge">AI +${suggestionCount}</span>`
+    : ''}
+        </span>
         <button
           class="category-remove-button"
           type="button"
@@ -2886,7 +3029,8 @@ function renderCategoryRules() {
         >${escapeHtml(formatKeywords(item.keywords))}</textarea>
       </label>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function addCategoryFolder() {
@@ -2915,7 +3059,8 @@ function removeCategoryFolder(index) {
     showCategorySettingsStatus(t('cannotRemoveLastCategory'), 'error');
     return;
   }
-  categoryDraft.splice(index, 1);
+  const [removed] = categoryDraft.splice(index, 1);
+  if (removed) delete categoryKeywordSuggestionCounts[removed.name];
   renderCategoryRules();
   showCategorySettingsStatus(t('categoryRemoved'), 'success');
 }
@@ -3004,6 +3149,10 @@ elements.compactBookmarkOrganizeEnabled.addEventListener('change', handleBookmar
 elements.compactBookmarkAutoCapture.addEventListener('change', handleBookmarkAutoCaptureChange);
 elements.compactBookmarkWriteMode.addEventListener('change', handleBookmarkWriteModeChange);
 elements.compactAddCategoryBtn.addEventListener('click', addCategoryFolder);
+elements.categoryKeywordAiAnalyzeBtn.addEventListener(
+  'click',
+  analyzeCategoryKeywordsWithAI
+);
 elements.compactNewCategory.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
@@ -3046,6 +3195,8 @@ elements.categorySaveBtn.addEventListener('click', async () => {
       currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
       showCategorySuggestion(currentSuggestion);
     }
+    categoryKeywordSuggestionCounts = {};
+    renderCategoryRules();
     showCategorySettingsStatus(t('reclassifyDone', {
       total: result.total || 0,
       updated: result.updated || 0,

@@ -163,7 +163,7 @@
         <span>SmartFav</span>
       </div>
       <h1>Privacy Policy / 隐私政策</h1>
-      <p class="effective">Effective date / 生效日期：July 27, 2026 / 2026 年 7 月 27 日</p>
+      <p class="effective">Effective date / 生效日期：July 29, 2026 / 2026 年 7 月 29 日</p>
       <nav class="language-nav" aria-label="Language">
         <a href="#english">English</a>
         <a href="#chinese">简体中文</a>
@@ -190,6 +190,7 @@
 
         <h3>3. Optional AI services</h3>
         <p>AI enhancement is off by default. If enabled, SmartFav sends a classification request directly to the provider selected by the user. A request may include the page title and URL, description or short text excerpt, page keywords, category names and rules, local scores and field weights, model name, and classification prompt.</p>
+        <p>When the user clicks “AI keyword suggestions,” SmartFav sends folder names, existing non-domain keywords, and the title, domain, and query-free URL path of up to 12 representative favorites from each non-empty folder. Query parameters and URL fragments are excluded. Suggestions are filled into local editable fields and are not saved until the user selects “Save and reclassify.”</p>
         <p>For a cloud provider, the user's API key is sent only to that provider for authentication. SmartFav supports OpenRouter, MiniMax, DeepSeek, OpenAI, a local Ollama service, and user-configured endpoints using the OpenAI Chat Completions or Anthropic Messages format. A custom endpoint operator selected by the user receives the request and API key under that operator's own terms and privacy policy. The publisher does not receive AI prompts, page information, API keys, or responses.</p>
         <p>Custom remote endpoints must use HTTPS. When saving or testing a compatible API configuration, SmartFav asks the browser for access only to the configured API host. HTTP custom endpoints are accepted only on <code>localhost</code> or <code>127.0.0.1</code>.</p>
 
@@ -207,10 +208,10 @@
         </ul>
 
         <h3>6. Sharing, sale, and tracking</h3>
-        <p>SmartFav does not sell personal information and does not share information for advertising, analytics, credit scoring, or cross-site tracking. Information is disclosed only to an AI provider selected and enabled by the user, as necessary to perform the requested classification.</p>
+        <p>SmartFav does not sell personal information and does not share information for advertising, analytics, credit scoring, or cross-site tracking. Information is disclosed only to an AI provider selected and enabled by the user, as necessary to perform the requested classification or keyword suggestion.</p>
 
         <h3>7. User controls</h3>
-        <p>Users can keep AI disabled, remove an API key, change providers, independently disable browser-favorites features, edit category rules, scan or update a pre-organization layout backup, preview or run a restore, export or import layout-backup JSON, delete or restore SmartFav items, permanently delete recently deleted items, clear extension data, or uninstall the extension.</p>
+        <p>Users can keep AI disabled, remove an API key, change providers, review, edit, or discard AI keyword suggestions before saving, independently disable browser-favorites features, edit category rules, scan or update a pre-organization layout backup, preview or run a restore, export or import layout-backup JSON, delete or restore SmartFav items, permanently delete recently deleted items, clear extension data, or uninstall the extension.</p>
 
         <h3>8. Security</h3>
         <p>Cloud AI requests use HTTPS. API keys and custom endpoint settings are stored locally and are sent only to the selected provider or user-configured endpoint. A local Ollama or compatible endpoint may use HTTP only on <code>localhost</code> or <code>127.0.0.1</code>. Users should protect their browser profile and API credentials.</p>
@@ -241,6 +242,7 @@
 
         <h3>3. 可选 AI 服务</h3>
         <p>AI 增强默认关闭。开启后，SmartFav 会直接向用户选择的服务商发送分类请求。请求可能包含网页标题和网址、描述或一小段网页文本、网页关键词、分类名称和规则、本地得分和字段权重、模型名称以及分类提示词。</p>
+        <p>用户点击“AI 分析并填入”时，SmartFav 会发送文件夹名称、已有的非域名关键词，以及每个非空文件夹最多 12 条代表性收藏的标题、域名和不含查询参数的网址路径。请求不包含网址查询参数或片段；建议会先填入本地可编辑字段，只有点击“保存并重新分类”后才会保存。</p>
         <p>使用云端服务商时，API Key 只会发送给该服务商用于身份验证。SmartFav 支持 OpenRouter、MiniMax、DeepSeek、OpenAI、本机 Ollama，以及用户配置的 OpenAI Chat Completions 或 Anthropic Messages 格式接口。用户选择的自定义接口运营方会按照其自身条款和隐私政策接收请求内容与 API Key。发布方不会收到 AI 提示词、网页信息、API Key 或返回结果。</p>
         <p>自定义远程接口必须使用 HTTPS。保存或测试兼容 API 配置时，SmartFav 只向浏览器请求所填写 API 主机的访问权限。HTTP 自定义接口仅允许使用 <code>localhost</code> 或 <code>127.0.0.1</code>。</p>
 
@@ -258,10 +260,10 @@
         </ul>
 
         <h3>6. 共享、出售与跟踪</h3>
-        <p>SmartFav 不出售个人信息，也不会为了广告、分析、信用评估或跨站跟踪而共享信息。只有用户选择并开启 AI 服务后，才会为完成用户请求的分类而向该服务商披露必要信息。</p>
+        <p>SmartFav 不出售个人信息，也不会为了广告、分析、信用评估或跨站跟踪而共享信息。只有用户选择并开启 AI 服务后，才会为完成用户请求的分类或关键词建议而向该服务商披露必要信息。</p>
 
         <h3>7. 用户控制</h3>
-        <p>用户可以保持关闭 AI、删除 API Key、更换服务商、分别关闭浏览器收藏夹功能、编辑分类规则、扫描或更新整理前布局备份、预览或执行还原、导入或导出布局备份 JSON、删除或恢复 SmartFav 收藏、永久删除最近删除内容、清除扩展数据或卸载扩展。</p>
+        <p>用户可以保持关闭 AI、删除 API Key、更换服务商、在保存前查看、编辑或放弃 AI 关键词建议、分别关闭浏览器收藏夹功能、编辑分类规则、扫描或更新整理前布局备份、预览或执行还原、导入或导出布局备份 JSON、删除或恢复 SmartFav 收藏、永久删除最近删除内容、清除扩展数据或卸载扩展。</p>
 
         <h3>8. 安全</h3>
         <p>云端 AI 请求使用 HTTPS。API Key 和自定义接口设置保存在本地，并且只会发送给用户选择的服务商或自定义接口。本机 Ollama 或兼容接口仅可通过 <code>localhost</code> 或 <code>127.0.0.1</code> 使用 HTTP。用户应妥善保护浏览器配置文件和 API 凭据。</p>

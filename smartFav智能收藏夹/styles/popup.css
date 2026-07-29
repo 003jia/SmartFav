@@ -1875,12 +1875,72 @@ select:focus-visible {
   line-height: 1.5;
 }
 
+.category-ai-assistant {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--tag-line);
+  border-radius: 10px;
+  background: var(--primary-soft);
+}
+
+.category-ai-copy {
+  min-width: 0;
+}
+
+.category-ai-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.category-ai-copy p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.category-ai-assistant button {
+  align-self: stretch;
+  min-width: 84px;
+  padding: 0 10px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  transition: background 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+}
+
+.category-ai-assistant button:hover:not(:disabled) {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.category-ai-assistant button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .category-rule-item {
   padding: 9px 10px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-soft);
   box-shadow: inset 0 1px 0 var(--shell-highlight);
+}
+
+.category-rule-item.has-ai-suggestions {
+  border-color: var(--tag-line);
+  background: linear-gradient(135deg, var(--surface-soft), var(--primary-soft));
 }
 
 .category-rule-header {
@@ -1891,6 +1951,13 @@ select:focus-visible {
   gap: 8px;
 }
 
+.category-rule-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .category-rule-name {
   overflow: hidden;
   color: var(--text);
@@ -1898,6 +1965,17 @@ select:focus-visible {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.category-rule-ai-badge {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--tag-line);
+  border-radius: 999px;
+  background: var(--tag-bg);
+  color: var(--primary);
+  font-size: 8px;
+  font-weight: 750;
 }
 
 .category-remove-button {

@@ -1,6 +1,6 @@
 # SmartFav Privacy Policy / SmartFav 隐私政策
 
-**Effective date / 生效日期: July 27, 2026 / 2026 年 7 月 27 日**
+**Effective date / 生效日期: July 29, 2026 / 2026 年 7 月 29 日**
 
 [English](#english) · [简体中文](#简体中文)
 
@@ -34,6 +34,9 @@ AI enhancement is off by default. If you explicitly enable it, SmartFav sends a 
 - Your category names and keyword rules.
 - Local classification scores and field weights.
 - The model name and the prompt needed to return a classification.
+- When you click “AI keyword suggestions”: folder names, existing non-domain keywords, and the title, domain, and query-free URL path of up to 12 representative favorites from each non-empty folder.
+
+AI keyword suggestions run only after you click the button. Suggested keywords are filled into local editable fields and are not saved until you select “Save and reclassify.” Query parameters and URL fragments are not included in this request.
 
 For cloud providers, your API key is sent only to that provider as authentication for the request. SmartFav supports OpenRouter, MiniMax, DeepSeek, OpenAI, a local Ollama service, and user-configured endpoints that use the OpenAI Chat Completions or Anthropic Messages request format. When a custom endpoint is used, the endpoint operator selected by the user receives the request and API key. Its processing is governed by that operator's own terms and privacy policy.
 
@@ -63,7 +66,7 @@ The `notifications` permission is used only to display the local classification 
 
 ### 6. Sharing, sale, and tracking
 
-SmartFav does not sell personal information. It does not share information with the publisher or third parties for advertising, analytics, credit scoring, or cross-site tracking. Information is disclosed only to an AI provider selected and enabled by the user, as necessary to perform the requested AI classification.
+SmartFav does not sell personal information. It does not share information with the publisher or third parties for advertising, analytics, credit scoring, or cross-site tracking. Information is disclosed only to an AI provider selected and enabled by the user, as necessary to perform the requested AI classification or keyword suggestion.
 
 ### 7. User controls
 
@@ -71,6 +74,7 @@ Users can:
 
 - Keep AI disabled and use local classification only.
 - Select or change an AI provider, remove the API key, or turn AI off at any time.
+- Review, edit, or discard AI keyword suggestions before saving category rules.
 - Independently enable or disable browser-favorites synchronization, organization, and automatic capture.
 - Scan or update a pre-organization layout backup, preview a restore, restore existing bookmarks to recorded folders, and export or import a layout-backup JSON file.
 - Edit category rules, delete SmartFav items, restore or permanently delete recently deleted items, clear extension data, or uninstall the extension.
@@ -123,6 +127,9 @@ AI 增强默认关闭。只有在你明确开启后，SmartFav 才会从扩展�
 - 你的分类名称和关键词规则。
 - 本地分类得分、字段权重。
 - 模型名称和完成分类所需的提示词。
+- 点击“AI 分析并填入”时：文件夹名称、已有的非域名关键词，以及每个非空文件夹最多 12 条代表性收藏的标题、域名和不含查询参数的网址路径。
+
+AI 关键词建议只在你主动点击按钮后运行。建议会先填入本地可编辑字段，只有点击“保存并重新分类”后才会保存。该请求不包含网址查询参数或片段。
 
 使用云端服务商时，你的 API Key 只会作为请求身份验证信息发送给该服务商。SmartFav 支持 OpenRouter、MiniMax、DeepSeek、OpenAI、本机 Ollama，以及用户配置的 OpenAI Chat Completions 或 Anthropic Messages 格式接口。使用自定义接口时，用户选择的接口运营方会收到请求内容和 API Key，其处理方式受该运营方自身的条款和隐私政策约束。
 
@@ -152,7 +159,7 @@ SmartFav 在整理现有收藏或自动移动新收藏前，会先为仍在 Smar
 
 ### 6. 共享、出售与跟踪
 
-SmartFav 不出售个人信息，也不会为了广告、分析、信用评估或跨站跟踪而向发布方或第三方共享信息。只有在用户选择并开启 AI 服务后，SmartFav 才会为完成用户请求的 AI 分类而向该服务商披露必要信息。
+SmartFav 不出售个人信息，也不会为了广告、分析、信用评估或跨站跟踪而向发布方或第三方共享信息。只有在用户选择并开启 AI 服务后，SmartFav 才会为完成用户请求的 AI 分类或关键词建议而向该服务商披露必要信息。
 
 ### 7. 用户控制
 
@@ -160,6 +167,7 @@ SmartFav 不出售个人信息，也不会为了广告、分析、信用评估�
 
 - 始终关闭 AI，仅使用本地分类。
 - 随时选择或更换 AI 服务商、删除 API Key 或关闭 AI。
+- 在保存分类规则前查看、编辑或放弃 AI 关键词建议。
 - 分别开启或关闭浏览器收藏夹同步、整理和自动获取。
 - 扫描或更新整理前布局备份、预览还原、把现有书签还原到记录的文件夹，以及导入或导出布局备份 JSON。
 - 编辑分类规则、删除 SmartFav 收藏、恢复或永久删除最近删除内容、清除扩展数据或卸载扩展。

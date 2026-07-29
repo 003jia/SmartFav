@@ -22,11 +22,12 @@ const i18n = require(path.join(extensionRoot, 'i18n.js'));
 const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'));
 const bookmarkBackup = require(path.join(extensionRoot, 'bookmark-backup.js'));
 const aiClient = require(path.join(extensionRoot, 'ai-client.js'));
+const aiKeywordSuggestions = require(path.join(extensionRoot, 'ai-keyword-suggestions.js'));
 const orderUtils = require(path.join(extensionRoot, 'order-utils.js'));
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.14.1');
+  assert.equal(manifest.version, '1.14.2');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -61,6 +62,8 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="compactNewCategory"/);
   assert.match(popupHtml, /id="compactAddCategoryBtn"/);
   assert.match(popupHtml, /id="categoryRulesList"/);
+  assert.match(popupHtml, /id="categoryKeywordAiAnalyzeBtn"/);
+  assert.match(popupHtml, /id="aiKeywordAssistantHint"/);
   assert.match(popupHtml, /id="keywordSeparatorHint"[^>]*data-i18n="keywordSeparatorHint"/);
   assert.match(popupHtml, /id="favoritesNavBtn"/);
   assert.match(popupHtml, /id="categoryFoldersNavBtn"/);
@@ -219,6 +222,13 @@ function verifyManifestAndLocales() {
     popupHtml,
     /<script src="order-utils\.js\?v=[^"]+"><\/script>\s*<script src="popup\.js/
   );
+  assert.match(
+    popupHtml,
+    /<script src="ai-client\.js\?v=[^"]+"><\/script>\s*<script src="ai-keyword-suggestions\.js/
+  );
+  assert.match(popupJs, /async function analyzeCategoryKeywordsWithAI\(\)/);
+  assert.match(popupJs, /SmartFavAIKeywordSuggestions\.buildCategoryProfiles/);
+  assert.match(popupJs, /SmartFavAIKeywordSuggestions\.mergeIntoCategoryDraft/);
   assert.match(popupJs, /const metadata = showCategory \? `\$\{category\} · \$\{hostname\}` : hostname/);
   assert.match(popupJs, /class="category-count"/);
   assert.match(popupJs, /class="favorite-list-rows"/);
@@ -741,6 +751,106 @@ async function verifyAIProtocols() {
   } finally {
     global.fetch = originalFetch;
   }
+}
+
+function verifyAIKeywordSuggestions() {
+  const profiles = aiKeywordSuggestions.buildCategoryProfiles(
+    [
+      {
+        name: 'Programming',
+        keywords: ['code', 'domain:docs.example.com']
+      },
+      {
+        name: 'Other',
+        keywords: []
+      }
+    ],
+    [
+      {
+        title: 'Codex repository',
+        url: 'https://github.com/openai/codex?token=secret#readme',
+        category: 'Programming',
+        createdAt: 3
+      },
+      {
+        title: 'Developer documentation',
+        url: 'https://docs.example.com/guide?account=private',
+        category: 'Programming',
+        createdAt: 2
+      },
+      {
+        title: 'Older repository page',
+        url: 'https://github.com/openai/codex/issues?page=2',
+        category: 'Programming',
+        createdAt: 1
+      },
+      {
+        title: 'Protected browser page',
+        url: 'chrome://extensions',
+        category: 'Other',
+        createdAt: 4
+      }
+    ],
+    { sampleLimit: 2 }
+  );
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].category, 'Programming');
+  assert.deepEqual(profiles[0].existingKeywords, ['code']);
+  assert.equal(profiles[0].totalFavorites, 3);
+  assert.deepEqual(
+    profiles[0].samples.map((sample) => sample.domain),
+    ['github.com', 'docs.example.com']
+  );
+  const serializedProfiles = JSON.stringify(profiles);
+  assert.doesNotMatch(serializedProfiles, /token|secret|account|private|#readme/);
+  assert.match(serializedProfiles, /\/openai\/codex/);
+  assert.equal(aiKeywordSuggestions.createBatches(Array(11).fill({}), 5).length, 3);
+
+  const parsed = aiKeywordSuggestions.parseKeywordSuggestions(
+    '```json\n{"categories":[{"category":"Programming","keywords":["agent coding","code","domain:evil.example","https://evil.example","AI, TypeScript"]},{"category":"Unknown","keywords":["ignore"]}]}\n```',
+    ['Programming', 'Other']
+  );
+  assert.deepEqual(parsed, [{
+    category: 'Programming',
+    keywords: ['agent coding', 'code', 'AI', 'TypeScript']
+  }]);
+
+  const merged = aiKeywordSuggestions.mergeIntoCategoryDraft(
+    [
+      {
+        name: 'Programming',
+        keywords: ['code', 'domain:docs.example.com']
+      },
+      {
+        name: 'Other',
+        keywords: []
+      }
+    ],
+    parsed
+  );
+  assert.equal(merged.addedCount, 3);
+  assert.equal(merged.updatedCategories, 1);
+  assert.deepEqual(merged.addedByCategory, { Programming: 3 });
+  assert.deepEqual(merged.draft[0].keywords, [
+    'code',
+    'domain:docs.example.com',
+    'agent coding',
+    'AI',
+    'TypeScript'
+  ]);
+  assert.deepEqual(
+    aiKeywordSuggestions.parseKeywordSuggestions(
+      '{"categories":{"Other":["reference material"]}}',
+      ['Programming', 'Other']
+    ),
+    [{ category: 'Other', keywords: ['reference material'] }]
+  );
+  assert.throws(
+    () => aiKeywordSuggestions.parseKeywordSuggestions('not-json', ['Programming']),
+    /does not contain JSON/
+  );
+  assert.match(i18n.MESSAGES.zh_CN.aiKeywordAssistantHint, /查询参数/);
+  assert.match(i18n.MESSAGES.en.aiKeywordAssistantHint, /query-free/);
 }
 
 function createMockBookmarks() {
@@ -2451,6 +2561,7 @@ async function main() {
   verifyManualOrdering();
   verifyBilingualClassification();
   await verifyAIProtocols();
+  verifyAIKeywordSuggestions();
   await verifyBookmarkModes();
   await verifyManagedOrderSync();
   await verifyOrganizeBookmarks();

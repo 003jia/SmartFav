@@ -1,6 +1,6 @@
 # SmartFav Microsoft Edge Add-ons 提交清单
 
-本清单对应 SmartFav 1.13.0。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
+本清单对应 SmartFav 1.14.2。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
 
 建议英文商店名称使用 **SmartFav - Bookmark Organizer**，中文名称继续使用 **SmartFav - 智能收藏夹**。这样既保留现有品牌，也能让英语用户直接理解用途，避免与大量泛化的 “AI Bookmark Organizer” 名称混在一起。
 
@@ -92,7 +92,7 @@ English:
 
 AI 服务域名：
 
-> 仅在用户开启 AI 增强或主动测试连接时，连接用户选择的 Ollama、OpenRouter、MiniMax、DeepSeek、OpenAI，或用户配置的 OpenAI / Anthropic 兼容接口。请求只用于返回分类结果；扩展不会从这些地址加载或执行代码。
+> 仅在用户开启 AI 增强并主动使用 AI 分类、AI 关键词建议或测试连接时，连接用户选择的 Ollama、OpenRouter、MiniMax、DeepSeek、OpenAI，或用户配置的 OpenAI / Anthropic 兼容接口。请求只用于返回分类结果或候选关键词；扩展不会从这些地址加载或执行代码。
 
 可选主机权限：
 
@@ -114,7 +114,7 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 - SmartFav 收藏及 Microsoft Edge 收藏夹信息。
 - 整理前保存在本地的布局备份，包括书签 ID、网址、标题、原文件夹路径和顺序。
 - 用户主动填写并保存在本地的 AI API Key 和设置。
-- 用户开启 AI 后，向所选服务商发送的分类请求数据。
+- 用户开启 AI 后，向所选服务商发送的分类请求数据；主动点击 AI 关键词建议时，还可能包含文件夹名、已有普通关键词，以及每个非空文件夹最多 12 条收藏的标题、域名和不含查询参数的网址路径。
 
 同时确认这些数据不用于广告、信用评估、出售、跨站跟踪或与扩展单一用途无关的用途。
 

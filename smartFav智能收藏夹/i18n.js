@@ -235,6 +235,15 @@
       keywordSeparatorHint: '多个关键词可用空格或英文逗号分隔，也支持中文逗号、分号或换行；带空格的词组请加英文双引号，例如 "machine learning"。',
       keywordsPlaceholder: '空格或逗号分隔，例如：设计 UI Figma',
       keywordsNormalized: '已识别分隔符并转换为英文逗号格式，保存后会重新分类。',
+      aiKeywordAssistant: 'AI 补全匹配关键词',
+      aiKeywordAssistantHint: '读取每个非空文件夹最多 12 条收藏的标题、域名和不含查询参数的网址路径，发送给当前 AI；建议只会填入下方输入框，不覆盖已有关键词。',
+      aiKeywordAnalyze: 'AI 分析并填入',
+      aiKeywordNeedsEnabled: '请先在设置中开启并配置 AI 增强',
+      aiKeywordNoFavorites: '当前分类文件夹中没有可供 AI 分析的收藏',
+      aiKeywordProgress: '正在分析第 {{current}}/{{total}} 批文件夹',
+      aiKeywordFilled: 'AI 已为 {{folders}} 个文件夹填入 {{count}} 个新关键词；检查后点击“保存并重新分类”。',
+      aiKeywordNoNew: 'AI 没有给出新的可用关键词，现有匹配字段保持不变',
+      aiKeywordFailed: 'AI 关键词分析失败：{{message}}；匹配字段未被修改',
       removeCategory: '删除“{{category}}”',
       duplicateCategory: '这个分类文件夹已经存在',
       categoryAdded: '文件夹已添加，请填写对应关键词',
@@ -260,6 +269,7 @@
       browserBookmarkUnavailable: '当前浏览器不支持收藏夹写入',
       browserBookmarkWriteFailed: '浏览器收藏夹写入失败',
       testPrompt: '只返回 JSON：{"status":"ok"}',
+      aiKeywordPrompt: '你是书签分类关键词提炼器。请根据每个文件夹中的收藏标题、域名和网址路径，为每个文件夹建议 3–10 个可复用、区分度高的匹配关键词。\n\n要求：\n1. 只返回 JSON，不要 Markdown 或解释。\n2. category 必须与输入的文件夹名完全一致，不创建或改名文件夹。\n3. 不返回完整网址、domain: 规则、查询参数，也不要重复 existingKeywords。\n4. 避免“网页、网站、首页、home、index”等过于通用的词。\n5. 如果文件夹内容混杂、无法提炼稳定特征，keywords 返回空数组。\n6. 带空格的短语作为一个数组项；不要移动或重新分类收藏。\n\n输入文件夹：\n{{folders}}\n\n返回格式：{"categories":[{"category":"原文件夹名","keywords":["关键词1","关键词2"]}]}',
       classifyPrompt: '请根据网页标签比例权重和分类关键词相似度完成分类，只返回 JSON。\n\n网页标题：{{title}}\n网页地址：{{url}}\n网页标签：{{keywords}}\n网页描述：{{description}}\n分类策略：{{strategy}}\n字段权重：{{weights}}\n现有分类：{{categories}}\n分类关键词：\n{{rules}}\n本地候选占比：{{evidence}}\n允许创建新分类：{{allowCreate}}\n\n优先选择现有分类。只有允许创建且所有现有分类都明显不适合时，才创建一个简短的新分类，并给出可复用关键词。\nJSON 格式：{"category":"现有或新分类","newCategory":"","newKeywords":["关键词"],"tags":["网页标签"],"summary":"简短理由"}'
     },
     en: {
@@ -495,6 +505,15 @@
       keywordSeparatorHint: 'Separate keywords with spaces or English commas. Chinese commas, semicolons, and line breaks also work. Put multi-word phrases in double quotes, e.g. "machine learning".',
       keywordsPlaceholder: 'Use spaces or commas, e.g. design UI Figma',
       keywordsNormalized: 'Keyword separators were normalized to English commas. Save to reclassify.',
+      aiKeywordAssistant: 'AI keyword suggestions',
+      aiKeywordAssistantHint: 'Sends the title, domain, and query-free URL path of up to 12 favorites from each non-empty folder to the configured AI. Suggestions are only filled into the fields below and never overwrite existing keywords.',
+      aiKeywordAnalyze: 'Analyze and fill',
+      aiKeywordNeedsEnabled: 'Enable and configure AI enhancement in Settings first',
+      aiKeywordNoFavorites: 'There are no favorites in the category folders for AI to analyze',
+      aiKeywordProgress: 'Analyzing folder batch {{current}} of {{total}}',
+      aiKeywordFilled: 'AI filled {{count}} new keywords across {{folders}} folders. Review them, then select “Save and reclassify”.',
+      aiKeywordNoNew: 'AI did not return any new usable keywords. Existing matching fields were left unchanged.',
+      aiKeywordFailed: 'AI keyword analysis failed: {{message}}. Matching fields were not changed.',
       removeCategory: 'Remove “{{category}}”',
       duplicateCategory: 'This category folder already exists',
       categoryAdded: 'Folder added. Now enter its matching keywords.',
@@ -520,6 +539,7 @@
       browserBookmarkUnavailable: 'This browser does not support favorite writing',
       browserBookmarkWriteFailed: 'Could not write to browser favorites',
       testPrompt: 'Return JSON only: {"status":"ok"}',
+      aiKeywordPrompt: 'You are a bookmark-category keyword editor. From the favorite titles, domains, and URL paths in each folder, suggest 3–10 reusable, distinctive matching keywords for every folder.\n\nRules:\n1. Return JSON only, with no Markdown or explanation.\n2. category must exactly match an input folder name. Do not create or rename folders.\n3. Do not return full URLs, domain: rules, query parameters, or values already in existingKeywords.\n4. Avoid overly broad terms such as page, website, home, or index.\n5. If a folder is mixed and has no stable theme, return an empty keywords array.\n6. Keep a multi-word phrase as one array item. Do not move or reclassify favorites.\n\nInput folders:\n{{folders}}\n\nResponse format: {"categories":[{"category":"exact folder name","keywords":["keyword 1","keyword 2"]}]}',
       classifyPrompt: 'Classify this page using weighted page tags and category-keyword similarity. Return JSON only.\n\nPage title: {{title}}\nPage URL: {{url}}\nPage tags: {{keywords}}\nPage description: {{description}}\nStrategy: {{strategy}}\nField weights: {{weights}}\nExisting categories: {{categories}}\nCategory keywords:\n{{rules}}\nLocal candidate ratios: {{evidence}}\nMay create a new category: {{allowCreate}}\n\nPrefer an existing category. Create one short new category only when creation is allowed and none of the existing categories clearly fits, then provide reusable keywords.\nJSON format: {"category":"existing or new category","newCategory":"","newKeywords":["keyword"],"tags":["page tag"],"summary":"short reason"}'
     }
   };
