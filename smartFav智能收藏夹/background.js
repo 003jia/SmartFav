@@ -549,6 +549,42 @@ async function deleteFavorite(url) {
   };
 }
 
+// 收藏保存的唯一写入入口。
+// 放在 withBookmarkLayoutLock 内，保证与浏览器书签事件回流、批量整理、排序写回互斥；
+// 书签写入统一走 getTrackedBookmarksApi()，使 SmartFav 自身的操作被标记为内部操作。
+async function saveFavoriteEntry(favorite, settingsPatch) {
+  if (!favorite || !favorite.url) {
+    throw new Error('Favorite url is required');
+  }
+  return withBookmarkLayoutLock(async () => {
+    const state = await getStoredState();
+    const settings = settingsPatch
+      ? { ...state.settings, ...settingsPatch }
+      : state.settings;
+    const withoutDuplicate = state.favorites.filter((item) => item.url !== favorite.url);
+    const nextValues = { favorites: [favorite, ...withoutDuplicate] };
+    if (settingsPatch) nextValues.settings = settings;
+    await setStoredStateChecked(nextValues);
+
+    let bookmark = { status: 'disabled' };
+    if (settings.browserBookmarksEnabled) {
+      // 书签写回失败不回滚 storage：收藏本身是用户的主要意图，
+      // 失败只降级提示（savedBrowserFailed），与修复前的行为保持一致。
+      try {
+        bookmark = await SmartFavBookmarks.writeFavorite(
+          favorite,
+          settings,
+          getTrackedBookmarksApi()
+        );
+      } catch (error) {
+        console.error('SmartFav browser favorite write failed:', error);
+        bookmark = { status: 'error', message: error && error.message ? error.message : '' };
+      }
+    }
+    return { status: 'ok', bookmark, settings };
+  });
+}
+
 // 分类文件夹或关键词规则变更后，使用已保存的标题、网址和描述
 // 重新运行本地分类器；开启浏览器同步时，同时移动 SmartFav 受管书签。
 async function reclassifyFavorites() {
@@ -1180,11 +1216,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   
   if (message.type === 'saveFavorite') {
-    chrome.storage.local.get(['favorites'], (result) => {
-      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
-      const nextFavorites = [message.favorite, ...favorites.filter((item) => item.url !== message.favorite.url)];
-      chrome.storage.local.set({ favorites: nextFavorites }, () => sendResponse({ success: true }));
-    });
+    saveFavoriteEntry(message.favorite, message.settingsPatch)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
     return true;
   }
 

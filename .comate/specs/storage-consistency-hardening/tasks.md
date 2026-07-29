@@ -25,7 +25,7 @@
     - 3.3: `background.js:1060` 的 `getFavorites` 降级分支补 lastError 检查，失败回传空数组而非 undefined
     - 3.4: 跑验证脚本，确认既有的"写入失败即中止"用例仍通过
 
-- [ ] Task 4: 内部操作标记持久化到 storage.session
+- [x] Task 4: 内部操作标记持久化到 storage.session
     - 4.1: 新增 `readInternalMarks` / `writeInternalMarks`，以 `chrome.storage.session` 为权威来源、内存 Map 为一级缓存
     - 4.2: `markInternalBookmarkRemoval` / `consumeInternalBookmarkRemoval` 及 move 对应的两个函数改为读写该层
     - 4.3: `chrome.storage.session` 不可用时静默回退为纯内存态，不抛错

@@ -1118,8 +1118,6 @@ elements.confirmBtn.addEventListener('click', async () => {
   elements.confirmBtn.disabled = true;
   elements.errorStatus.classList.add('hidden');
   try {
-    const result = await storageGet(['favorites']);
-    const favorites = Array.isArray(result.favorites) ? result.favorites : [];
     const selectedCategory = elements.categorySelect.value;
     const shouldLearn = Boolean(
       currentPageLearningProposal
@@ -1142,31 +1140,36 @@ elements.confirmBtn.addEventListener('click', async () => {
       manuallyCategorized: selectedCategory !== recommendedCategory,
       createdAt: Date.now()
     };
-    const withoutDuplicate = favorites.filter((item) => item.url !== favorite.url);
-    const storageValues = {
-      favorites: [favorite, ...withoutDuplicate]
-    };
-    if (learningResult) storageValues.settings = learningResult.settings;
-    await storageSet(storageValues);
-    if (learningResult) currentSettings = learningResult.settings;
 
+    // 收藏与书签写入统一交给 background：它在 withBookmarkLayoutLock 内串行执行，
+    // 并使用带内部操作标记的书签 API，避免与浏览器事件回流互相覆盖。
     let successKey = 'savedToSmartFav';
-    if (currentSettings.browserBookmarksEnabled) {
-      try {
-        const bookmarksApi = isExtension && chrome.bookmarks ? chrome.bookmarks : null;
-        const bookmarkResult = await SmartFavBookmarks.writeFavorite(
-          favorite,
-          currentSettings,
-          bookmarksApi
-        );
-        if (bookmarkResult.status === 'unavailable') {
-          throw new Error(t('browserBookmarkUnavailable'));
-        }
-        successKey = 'savedToBrowser';
-      } catch (error) {
-        console.error('Browser favorite write failed:', error);
-        successKey = 'savedBrowserFailed';
+    if (isExtension) {
+      const response = await sendRuntimeMessage('saveFavorite', {
+        favorite,
+        settingsPatch: learningResult ? { ...learningResult.settings } : null
+      });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message
+          ? response.message
+          : t('browserBookmarkUnavailable'));
       }
+      if (learningResult) currentSettings = learningResult.settings;
+      const bookmarkStatus = (response.bookmark && response.bookmark.status) || 'disabled';
+      if (bookmarkStatus === 'unavailable' || bookmarkStatus === 'error') {
+        successKey = 'savedBrowserFailed';
+      } else if (bookmarkStatus !== 'disabled') {
+        successKey = 'savedToBrowser';
+      }
+    } else {
+      const result = await storageGet(['favorites']);
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      const storageValues = {
+        favorites: [favorite, ...favorites.filter((item) => item.url !== favorite.url)]
+      };
+      if (learningResult) storageValues.settings = learningResult.settings;
+      await storageSet(storageValues);
+      if (learningResult) currentSettings = learningResult.settings;
     }
 
     pendingPageLearningUndo = learningResult;
