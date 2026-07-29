@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.13.0">
+  <link rel="stylesheet" href="styles/popup.css?v=1.14.1">
 </head>
 <body>
   <div class="app-shell">
@@ -31,7 +31,8 @@
 
       <section id="successStatus" class="notice notice-success hidden" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
-        <span id="successMsg" data-i18n="savedToSmartFav">已保存到 SmartFav</span>
+        <span id="successMsg" class="notice-message" data-i18n="savedToSmartFav">已保存到 SmartFav</span>
+        <button id="pageLearningUndoBtn" class="notice-action hidden" type="button" data-i18n="undoRemember">撤销记住</button>
       </section>
 
       <section id="errorStatus" class="notice notice-error hidden" aria-live="polite">
@@ -50,14 +51,25 @@
 
         <div class="classification-head">
           <span class="field-label" data-i18n="saveTo">保存到</span>
-          <span id="sourceBadge" class="source-badge" data-i18n="localRules">本地规则</span>
+          <span class="classification-badges">
+            <span id="confidenceBadge" class="confidence-badge hidden"></span>
+            <span id="sourceBadge" class="source-badge" data-i18n="localRules">本地规则</span>
+          </span>
         </div>
 
         <label class="select-wrap" for="categorySelect">
           <select id="categorySelect" data-i18n-aria-label="selectCategory" aria-label="选择收藏分类"></select>
         </label>
-        <p id="categorySummary" class="match-summary" data-i18n="findingKeywords">正在查找匹配关键词</p>
+        <p id="categorySummary" class="match-summary">正在查找匹配关键词</p>
         <div id="tagsContainer" class="tags" data-i18n-aria-label="matchedKeywords" aria-label="匹配到的关键词"></div>
+
+        <label id="pageLearningOption" class="page-learning-option hidden" for="pageLearningCheckbox">
+          <input id="pageLearningCheckbox" type="checkbox">
+          <span>
+            <strong data-i18n="rememberManualCategory">同时记住这个网站的分类</strong>
+            <small id="pageLearningDescription"></small>
+          </span>
+        </label>
 
         <div id="aiMessage" class="inline-message hidden" aria-live="polite"></div>
         <div class="action-row">
@@ -108,6 +120,22 @@
           <small id="trashEntryCount">0</small>
         </button>
       </div>
+
+      <section
+        id="classificationLearningPrompt"
+        class="learning-prompt hidden"
+        aria-labelledby="classificationLearningTitle"
+      >
+        <div class="learning-prompt-copy">
+          <h2 id="classificationLearningTitle" data-i18n="rememberClassificationTitle">记住这次分类？</h2>
+          <p id="classificationLearningMessage"></p>
+          <p id="classificationLearningHint" class="learning-prompt-hint"></p>
+        </div>
+        <div class="learning-prompt-actions">
+          <button id="classificationLearningDismissBtn" class="learning-button learning-button-secondary" type="button" data-i18n="skipLearning">这次不用</button>
+          <button id="classificationLearningRememberBtn" class="learning-button learning-button-primary" type="button" data-i18n="rememberClassification">记住</button>
+        </div>
+      </section>
 
       <section class="content-section" id="recentSection" aria-labelledby="recentTitle">
         <div class="section-heading">
@@ -383,11 +411,11 @@
     </section>
   </div>
 
-  <script src="i18n.js?v=1.13.0"></script>
-  <script src="classifier.js?v=1.13.0"></script>
-  <script src="browser-bookmarks.js?v=1.13.0"></script>
-  <script src="ai-client.js?v=1.13.0"></script>
-  <script src="order-utils.js?v=1.13.0"></script>
-  <script src="popup.js?v=1.13.0"></script>
+  <script src="i18n.js?v=1.14.1"></script>
+  <script src="classifier.js?v=1.14.1"></script>
+  <script src="browser-bookmarks.js?v=1.14.1"></script>
+  <script src="ai-client.js?v=1.14.1"></script>
+  <script src="order-utils.js?v=1.14.1"></script>
+  <script src="popup.js?v=1.14.1"></script>
 </body>
 </html>

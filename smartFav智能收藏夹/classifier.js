@@ -53,6 +53,41 @@
       .trim();
   }
 
+  function normalizeDomain(value) {
+    const source = String(value || '').trim();
+    if (!source) return '';
+    const candidate = /^[a-z][a-z0-9+.-]*:\/\//iu.test(source)
+      ? source
+      : `https://${source}`;
+    try {
+      const parsed = new URL(candidate);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+      return normalize(parsed.hostname)
+        .replace(/^www\./u, '')
+        .replace(/\.$/u, '');
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function parseDomainRule(value) {
+    const keyword = normalize(value);
+    if (!keyword.startsWith('domain:')) return '';
+    return normalizeDomain(keyword.slice('domain:'.length));
+  }
+
+  function isDomainRule(value) {
+    return normalize(value).startsWith('domain:');
+  }
+
+  function domainMatches(hostname, domain) {
+    return Boolean(
+      hostname
+      && domain
+      && (hostname === domain || hostname.endsWith(`.${domain}`))
+    );
+  }
+
   function splitKeywords(value) {
     if (Array.isArray(value)) {
       return [...new Set(value
@@ -129,6 +164,7 @@
     const index = new Map();
     Object.entries(rules).forEach(([category, keywords]) => {
       keywords.forEach((keyword) => {
+        if (isDomainRule(keyword)) return;
         if (!index.has(keyword)) index.set(keyword, []);
         index.get(keyword).push(category);
       });
@@ -215,7 +251,9 @@
   function createCategoryVector(category, keywords) {
     const vector = new Map();
     addToVector(vector, category, 2);
-    keywords.forEach((keyword) => addToVector(vector, keyword, 1));
+    keywords
+      .filter((keyword) => !isDomainRule(keyword))
+      .forEach((keyword) => addToVector(vector, keyword, 1));
     return vector;
   }
 
@@ -225,6 +263,138 @@
       category,
       total ? Math.round((Math.max(0, score) / total) * 1000) / 10 : 0
     ]));
+  }
+
+  function findDomainRuleMatch(url, categories, rules) {
+    const hostname = normalizeDomain(url);
+    if (!hostname) return null;
+    for (const category of categories) {
+      const matchedDomain = (rules[category] || [])
+        .map(parseDomainRule)
+        .find((domain) => domainMatches(hostname, domain));
+      if (matchedDomain) {
+        return {
+          category,
+          domain: matchedDomain,
+          keyword: `domain:${matchedDomain}`
+        };
+      }
+    }
+    return null;
+  }
+
+  function calculateConfidence({
+    category,
+    fallback,
+    method,
+    score,
+    scores,
+    tags,
+    domainMatch
+  }) {
+    if (domainMatch) return 'high';
+    if (!category || category === fallback || score <= 0) return 'low';
+    const rankedScores = Object.entries(scores)
+      .filter(([name]) => name !== fallback)
+      .map(([, value]) => Math.max(0, Number(value) || 0))
+      .sort((left, right) => right - left);
+    const margin = Math.max(0, score - (rankedScores[1] || 0));
+    if (method === 'vector') {
+      return score >= 18 && margin >= 4 ? 'high' : 'medium';
+    }
+    if (
+      tags.length >= 2
+      || (score >= 24 && margin >= Math.max(8, score * 0.35))
+    ) {
+      return 'high';
+    }
+    return 'medium';
+  }
+
+  function createDomainLearningProposal(favorite, targetCategory, settings = {}) {
+    const categories = Array.isArray(settings.categories) ? settings.categories : [];
+    if (!categories.includes(targetCategory)) return null;
+    const domain = normalizeDomain(favorite && favorite.url);
+    if (!domain) return null;
+    const language = String(settings.language || 'zh_CN').toLowerCase().startsWith('zh')
+      ? 'zh_CN'
+      : 'en';
+    const rules = mergeRules(categories, settings.keywordRules, language);
+    const matchingCategories = categories.filter((category) => (
+      (rules[category] || []).some((keyword) => parseDomainRule(keyword) === domain)
+    ));
+    const alreadyInTarget = matchingCategories.includes(targetCategory);
+    const previousCategories = matchingCategories.filter((category) => category !== targetCategory);
+    if (alreadyInTarget && !previousCategories.length) return null;
+    return {
+      type: 'domain',
+      domain,
+      keyword: `domain:${domain}`,
+      title: favorite && favorite.title ? String(favorite.title) : '',
+      targetCategory,
+      previousCategories,
+      alreadyInTarget
+    };
+  }
+
+  function applyDomainLearning(settings = {}, proposal = {}) {
+    const categories = Array.isArray(settings.categories) ? settings.categories : [];
+    const targetCategory = String(proposal.targetCategory || '');
+    const domain = normalizeDomain(proposal.domain) || parseDomainRule(proposal.keyword);
+    if (!domain || !categories.includes(targetCategory)) {
+      throw new Error('Invalid domain learning proposal');
+    }
+    const language = String(settings.language || 'zh_CN').toLowerCase().startsWith('zh')
+      ? 'zh_CN'
+      : 'en';
+    const currentRules = mergeRules(categories, settings.keywordRules, language);
+    const removedFrom = [];
+    const nextRules = Object.fromEntries(categories.map((category) => {
+      const keywords = (currentRules[category] || []).filter((keyword) => {
+        const shouldRemove = parseDomainRule(keyword) === domain;
+        if (shouldRemove && category !== targetCategory && !removedFrom.includes(category)) {
+          removedFrom.push(category);
+        }
+        return !shouldRemove;
+      });
+      if (category === targetCategory) keywords.push(`domain:${domain}`);
+      return [category, [...new Set(keywords)]];
+    }));
+    return {
+      settings: {
+        ...settings,
+        keywordRules: nextRules
+      },
+      previousKeywordRules: Object.fromEntries(categories.map((category) => [
+        category,
+        [...(currentRules[category] || [])]
+      ])),
+      domain,
+      keyword: `domain:${domain}`,
+      targetCategory,
+      removedFrom
+    };
+  }
+
+  function revertDomainLearning(settings = {}, learningResult = {}) {
+    const categories = Array.isArray(settings.categories) ? settings.categories : [];
+    const previousRules = learningResult.previousKeywordRules;
+    if (!previousRules || typeof previousRules !== 'object') {
+      throw new Error('Invalid domain learning rollback');
+    }
+    const keywordRules = Object.fromEntries(categories.map((category) => {
+      if (!Array.isArray(previousRules[category])) {
+        throw new Error('Incomplete domain learning rollback');
+      }
+      return [
+        category,
+        [...new Set(previousRules[category].map(normalize).filter(Boolean))]
+      ];
+    }));
+    return {
+      ...settings,
+      keywordRules
+    };
   }
 
   function classify(tabInfo, settings = {}) {
@@ -276,6 +446,14 @@
     }));
     const method = settings.classificationMode === 'vector' ? 'vector' : 'weighted';
     const scores = method === 'vector' ? vectorScores : weightedScores;
+    const domainMatch = findDomainRuleMatch(tabInfo.url, categories, rules);
+    if (domainMatch) {
+      const highestScore = Math.max(0, ...Object.values(scores));
+      scores[domainMatch.category] = Math.max(
+        Number(scores[domainMatch.category]) || 0,
+        highestScore + 100
+      );
+    }
     const preferredFallback = language === 'zh_CN' ? '其他' : 'Other';
     const fallback = categories.includes(preferredFallback)
       ? preferredFallback
@@ -284,8 +462,11 @@
       .filter((category) => category !== fallback)
       .sort((a, b) => scores[b] - scores[a]);
     const minimumScore = method === 'vector' ? 4 : 0;
-    const category = ranked[0] && scores[ranked[0]] > minimumScore ? ranked[0] : fallback;
+    const category = domainMatch
+      ? domainMatch.category
+      : ranked[0] && scores[ranked[0]] > minimumScore ? ranked[0] : fallback;
     const vectorTags = (rules[category] || [])
+      .filter((keyword) => !isDomainRule(keyword))
       .map((keyword) => {
         const keywordVector = new Map();
         addToVector(keywordVector, keyword, 1);
@@ -294,22 +475,40 @@
       .filter((item) => item.similarity > 0)
       .sort((a, b) => b.similarity - a.similarity)
       .map((item) => item.keyword);
-    const tags = (method === 'vector'
-      ? vectorTags
-      : Array.from(matches[category] || []))
-      .slice(0, 4);
+    const tags = domainMatch
+      ? [domainMatch.domain]
+      : (method === 'vector'
+        ? vectorTags
+        : Array.from(matches[category] || []))
+        .slice(0, 4);
     const score = scores[category] || 0;
+    const ratios = scoreRatios(scores);
+    const confidence = calculateConfidence({
+      category,
+      fallback,
+      method,
+      score,
+      scores,
+      tags,
+      domainMatch
+    });
 
     return {
       category,
       tags,
       score,
       scores,
-      scoreRatios: scoreRatios(scores),
+      scoreRatios: ratios,
       method,
       weights,
+      confidence,
+      matchType: domainMatch ? 'domain' : 'keywords',
       source: 'local',
-      summary: tags.length
+      summary: domainMatch
+        ? language === 'zh_CN'
+          ? `根据已记住的域名规则“${domainMatch.domain}”归类`
+          : `Classified by the remembered domain rule “${domainMatch.domain}”`
+        : tags.length
         ? language === 'zh_CN'
           ? `匹配到 ${tags.map((tag) => `“${tag}”`).join('、')}`
           : `Matched ${tags.map((tag) => `“${tag}”`).join(', ')}`
@@ -346,6 +545,11 @@
     getDefaults,
     buildKeywordIndex,
     classify,
+    normalizeDomain,
+    parseDomainRule,
+    createDomainLearningProposal,
+    applyDomainLearning,
+    revertDomainLearning,
     cosineSimilarity,
     mergeRules,
     normalizeWeights,

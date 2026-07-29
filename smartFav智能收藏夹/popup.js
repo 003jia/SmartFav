@@ -187,6 +187,7 @@ const elements = {
   loadingStatus: document.getElementById('loadingStatus'),
   successStatus: document.getElementById('successStatus'),
   successMsg: document.getElementById('successMsg'),
+  pageLearningUndoBtn: document.getElementById('pageLearningUndoBtn'),
   errorStatus: document.getElementById('errorStatus'),
   errorMsg: document.getElementById('errorMsg'),
   categorySection: document.getElementById('categorySection'),
@@ -195,7 +196,11 @@ const elements = {
   categorySelect: document.getElementById('categorySelect'),
   categorySummary: document.getElementById('categorySummary'),
   sourceBadge: document.getElementById('sourceBadge'),
+  confidenceBadge: document.getElementById('confidenceBadge'),
   tagsContainer: document.getElementById('tagsContainer'),
+  pageLearningOption: document.getElementById('pageLearningOption'),
+  pageLearningCheckbox: document.getElementById('pageLearningCheckbox'),
+  pageLearningDescription: document.getElementById('pageLearningDescription'),
   confirmBtn: document.getElementById('confirmBtn'),
   enhanceBtn: document.getElementById('enhanceBtn'),
   aiMessage: document.getElementById('aiMessage'),
@@ -207,6 +212,12 @@ const elements = {
   librarySummary: document.getElementById('librarySummary'),
   favoritesViewSummary: document.getElementById('favoritesViewSummary'),
   favoritesReorderStatus: document.getElementById('favoritesReorderStatus'),
+  classificationLearningPrompt: document.getElementById('classificationLearningPrompt'),
+  classificationLearningTitle: document.getElementById('classificationLearningTitle'),
+  classificationLearningMessage: document.getElementById('classificationLearningMessage'),
+  classificationLearningHint: document.getElementById('classificationLearningHint'),
+  classificationLearningDismissBtn: document.getElementById('classificationLearningDismissBtn'),
+  classificationLearningRememberBtn: document.getElementById('classificationLearningRememberBtn'),
   categoryEntrySummary: document.getElementById('categoryEntrySummary'),
   favoritesNavBtn: document.getElementById('favoritesNavBtn'),
   categoryFoldersNavBtn: document.getElementById('categoryFoldersNavBtn'),
@@ -274,6 +285,11 @@ let lastShownBrowserActivityId = '';
 let currentBrowserActivity = null;
 let currentBookmarkRestorePoint = null;
 let settingsSaveQueue = Promise.resolve();
+let pendingLearningProposal = null;
+let recommendedCategory = '';
+let currentPageLearningProposal = null;
+let pendingPageLearningUndo = null;
+let popupCloseTimer = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   await recoverManagedBrowserFavorites();
@@ -735,6 +751,7 @@ async function toggleColorMode() {
 }
 
 async function switchLanguage() {
+  hideClassificationLearningPrompt();
   const previousLanguage = currentSettings.language;
   const nextLanguage = previousLanguage === 'zh_CN' ? 'en' : 'zh_CN';
   const shouldMigrateDefaults = isUsingDefaultClassification(currentSettings, previousLanguage);
@@ -867,12 +884,32 @@ function showCategorySuggestion(suggestion) {
   elements.categorySelect.value = currentSettings.categories.includes(suggestion.category)
     ? suggestion.category
     : currentSettings.categories[currentSettings.categories.length - 1];
+  recommendedCategory = elements.categorySelect.value;
+  resetPageLearningOption();
   elements.categorySummary.textContent = suggestion.summary;
   elements.tagsContainer.innerHTML = suggestion.tags
     .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
     .join('');
   elements.sourceBadge.textContent = t(suggestion.source === 'ai' ? 'aiEnhanced' : 'localRules');
   elements.sourceBadge.classList.toggle('ai', suggestion.source === 'ai');
+  const confidence = ['high', 'medium', 'low'].includes(suggestion.confidence)
+    ? suggestion.confidence
+    : '';
+  const confidenceLabel = confidence
+    ? t(`confidence${confidence[0].toUpperCase()}${confidence.slice(1)}`)
+    : '';
+  elements.confidenceBadge.className = `confidence-badge${confidence ? ` confidence-${confidence}` : ''}`;
+  elements.confidenceBadge.classList.toggle(
+    'hidden',
+    suggestion.source === 'ai' || !confidence
+  );
+  elements.confidenceBadge.textContent = confidenceLabel;
+  elements.confidenceBadge.setAttribute(
+    'aria-label',
+    confidenceLabel
+      ? t('classificationConfidence', { level: confidenceLabel })
+      : ''
+  );
   elements.enhanceBtn.classList.toggle('hidden', !currentSettings.aiEnabled);
   elements.enhanceBtn.textContent = t('aiOptimize');
   elements.privacyHint.textContent = t(suggestion.source === 'ai' ? 'privacyAI' : 'privacyLocal');
@@ -884,9 +921,65 @@ function updateConfirmLabel() {
   elements.confirmBtn.textContent = t('saveToCategory', { category });
 }
 
+function getFallbackCategory() {
+  const preferred = currentSettings.language === 'zh_CN' ? '其他' : 'Other';
+  return currentSettings.categories.includes(preferred)
+    ? preferred
+    : currentSettings.categories[currentSettings.categories.length - 1];
+}
+
+function resetPageLearningOption() {
+  currentPageLearningProposal = null;
+  elements.pageLearningOption.classList.add('hidden');
+  elements.pageLearningCheckbox.checked = false;
+  elements.pageLearningDescription.textContent = '';
+}
+
+function updatePageLearningOption() {
+  const targetCategory = elements.categorySelect.value;
+  if (
+    !currentTabInfo
+    || !targetCategory
+    || !recommendedCategory
+    || targetCategory === recommendedCategory
+  ) {
+    resetPageLearningOption();
+    return;
+  }
+  const proposal = SmartFavClassifier.createDomainLearningProposal(
+    currentTabInfo,
+    targetCategory,
+    currentSettings
+  );
+  if (!proposal) {
+    resetPageLearningOption();
+    return;
+  }
+  currentPageLearningProposal = proposal;
+  const isFallback = targetCategory === getFallbackCategory();
+  elements.pageLearningCheckbox.checked = !isFallback;
+  elements.pageLearningOption.classList.remove('hidden');
+  if (isFallback) {
+    elements.pageLearningDescription.textContent = t('rememberManualCategoryFallback');
+  } else if (proposal.previousCategories.length) {
+    elements.pageLearningDescription.textContent = t('rememberManualCategoryConflict', {
+      domain: proposal.domain,
+      categories: proposal.previousCategories.join(
+        currentSettings.language === 'zh_CN' ? '、' : ', '
+      ),
+      category: proposal.targetCategory
+    });
+  } else {
+    elements.pageLearningDescription.textContent = t('rememberManualCategoryDescription', {
+      domain: proposal.domain,
+      category: proposal.targetCategory
+    });
+  }
+}
+
 elements.categorySelect.addEventListener('change', () => {
-  if (currentSuggestion) currentSuggestion.category = elements.categorySelect.value;
   updateConfirmLabel();
+  updatePageLearningOption();
 });
 
 elements.enhanceBtn.addEventListener('click', () => {
@@ -1010,43 +1103,119 @@ async function applyAIResponse(response) {
 elements.confirmBtn.addEventListener('click', async () => {
   if (!currentSuggestion || !currentTabInfo) return;
   elements.confirmBtn.disabled = true;
-  const result = await storageGet(['favorites']);
-  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
-  const favorite = {
-    ...currentTabInfo,
-    category: elements.categorySelect.value,
-    tags: currentSuggestion.tags,
-    summary: currentSuggestion.summary,
-    classificationSource: currentSuggestion.source,
-    createdAt: Date.now()
-  };
-  const withoutDuplicate = favorites.filter((item) => item.url !== favorite.url);
-  await storageSet({ favorites: [favorite, ...withoutDuplicate] });
-
-  let successKey = 'savedToSmartFav';
-  if (currentSettings.browserBookmarksEnabled) {
-    try {
-      const bookmarksApi = isExtension && chrome.bookmarks ? chrome.bookmarks : null;
-      const bookmarkResult = await SmartFavBookmarks.writeFavorite(
-        favorite,
+  elements.errorStatus.classList.add('hidden');
+  try {
+    const result = await storageGet(['favorites']);
+    const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+    const selectedCategory = elements.categorySelect.value;
+    const shouldLearn = Boolean(
+      currentPageLearningProposal
+      && currentPageLearningProposal.targetCategory === selectedCategory
+      && elements.pageLearningCheckbox.checked
+    );
+    const learningResult = shouldLearn
+      ? SmartFavClassifier.applyDomainLearning(
         currentSettings,
-        bookmarksApi
-      );
-      if (bookmarkResult.status === 'unavailable') throw new Error(t('browserBookmarkUnavailable'));
-      successKey = 'savedToBrowser';
-    } catch (error) {
-      console.error('Browser favorite write failed:', error);
-      successKey = 'savedBrowserFailed';
-    }
-  }
+        currentPageLearningProposal
+      )
+      : null;
+    const favorite = {
+      ...currentTabInfo,
+      category: selectedCategory,
+      tags: currentSuggestion.tags,
+      summary: currentSuggestion.summary,
+      classificationSource: currentSuggestion.source,
+      suggestedCategory: recommendedCategory,
+      manuallyCategorized: selectedCategory !== recommendedCategory,
+      createdAt: Date.now()
+    };
+    const withoutDuplicate = favorites.filter((item) => item.url !== favorite.url);
+    const storageValues = {
+      favorites: [favorite, ...withoutDuplicate]
+    };
+    if (learningResult) storageValues.settings = learningResult.settings;
+    await storageSet(storageValues);
+    if (learningResult) currentSettings = learningResult.settings;
 
-  elements.categorySection.classList.add('hidden');
-  elements.successMsg.textContent = t(successKey);
-  elements.successStatus.classList.remove('hidden');
-  await Promise.all([renderFolders(), renderRecentFavorites()]);
-  elements.confirmBtn.disabled = false;
-  if (isExtension) setTimeout(() => window.close(), 1300);
+    let successKey = 'savedToSmartFav';
+    if (currentSettings.browserBookmarksEnabled) {
+      try {
+        const bookmarksApi = isExtension && chrome.bookmarks ? chrome.bookmarks : null;
+        const bookmarkResult = await SmartFavBookmarks.writeFavorite(
+          favorite,
+          currentSettings,
+          bookmarksApi
+        );
+        if (bookmarkResult.status === 'unavailable') {
+          throw new Error(t('browserBookmarkUnavailable'));
+        }
+        successKey = 'savedToBrowser';
+      } catch (error) {
+        console.error('Browser favorite write failed:', error);
+        successKey = 'savedBrowserFailed';
+      }
+    }
+
+    pendingPageLearningUndo = learningResult;
+    elements.categorySection.classList.add('hidden');
+    elements.successMsg.textContent = learningResult
+      ? t('savedAndRemembered', {
+        status: t(successKey),
+        domain: learningResult.domain,
+        category: learningResult.targetCategory
+      })
+      : t(successKey);
+    elements.pageLearningUndoBtn.classList.toggle('hidden', !learningResult);
+    elements.pageLearningUndoBtn.disabled = false;
+    elements.successStatus.classList.remove('hidden');
+    await Promise.all([renderFolders(), renderRecentFavorites()]);
+    elements.confirmBtn.disabled = false;
+    schedulePopupClose(learningResult ? 6500 : 1300);
+  } catch (error) {
+    console.error('Favorite save failed:', error);
+    elements.errorMsg.textContent = t('favoriteSaveFailed', {
+      message: error && error.message ? error.message : String(error || '')
+    });
+    elements.errorStatus.classList.remove('hidden');
+    elements.confirmBtn.disabled = false;
+  }
 });
+
+function schedulePopupClose(delay) {
+  if (!isExtension) return;
+  if (popupCloseTimer) clearTimeout(popupCloseTimer);
+  popupCloseTimer = setTimeout(() => window.close(), delay);
+}
+
+async function undoPageLearning() {
+  if (!pendingPageLearningUndo) return;
+  if (popupCloseTimer) {
+    clearTimeout(popupCloseTimer);
+    popupCloseTimer = null;
+  }
+  elements.pageLearningUndoBtn.disabled = true;
+  const learningResult = pendingPageLearningUndo;
+  try {
+    const revertedSettings = SmartFavClassifier.revertDomainLearning(
+      currentSettings,
+      learningResult
+    );
+    await storageSet({ settings: revertedSettings });
+    currentSettings = revertedSettings;
+    pendingPageLearningUndo = null;
+    elements.successMsg.textContent = t('learningUndone', {
+      category: learningResult.targetCategory
+    });
+    elements.pageLearningUndoBtn.classList.add('hidden');
+    schedulePopupClose(1800);
+  } catch (error) {
+    console.error('Domain learning undo failed:', error);
+    elements.successMsg.textContent = t('learningUndoFailed');
+    elements.pageLearningUndoBtn.disabled = false;
+  }
+}
+
+elements.pageLearningUndoBtn.addEventListener('click', undoPageLearning);
 
 async function renderFolders() {
   activeFavoriteCategory = null;
@@ -1636,6 +1805,10 @@ async function moveFavoriteToCategory(url, targetCategory) {
     } else {
       await renderFolders();
     }
+    showClassificationLearningPrompt(
+      response.favorite || { title, url },
+      targetCategory
+    );
     return true;
   } catch (error) {
     const message = t('favoriteMoveFailed', {
@@ -1645,6 +1818,75 @@ async function moveFavoriteToCategory(url, targetCategory) {
     elements.errorMsg.textContent = message;
     elements.errorStatus.classList.remove('hidden');
     return false;
+  }
+}
+
+function hideClassificationLearningPrompt() {
+  pendingLearningProposal = null;
+  elements.classificationLearningPrompt.classList.add('hidden');
+  elements.classificationLearningPrompt.classList.remove('is-saved', 'is-error');
+  elements.classificationLearningRememberBtn.hidden = false;
+  elements.classificationLearningRememberBtn.disabled = false;
+  elements.classificationLearningRememberBtn.textContent = t('rememberClassification');
+  elements.classificationLearningDismissBtn.textContent = t('skipLearning');
+}
+
+function showClassificationLearningPrompt(favorite, targetCategory) {
+  const proposal = SmartFavClassifier.createDomainLearningProposal(
+    favorite,
+    targetCategory,
+    currentSettings
+  );
+  if (!proposal) {
+    hideClassificationLearningPrompt();
+    return;
+  }
+  pendingLearningProposal = proposal;
+  elements.classificationLearningPrompt.classList.remove('hidden', 'is-saved', 'is-error');
+  elements.classificationLearningTitle.textContent = t('rememberClassificationTitle');
+  elements.classificationLearningMessage.textContent = t('rememberClassificationMessage', {
+    domain: proposal.domain,
+    category: proposal.targetCategory
+  });
+  elements.classificationLearningHint.textContent = proposal.previousCategories.length
+    ? t('rememberClassificationConflictHint', {
+      categories: proposal.previousCategories.join('、')
+    })
+    : t('rememberClassificationHint', { rule: proposal.keyword });
+  elements.classificationLearningRememberBtn.hidden = false;
+  elements.classificationLearningRememberBtn.disabled = false;
+  elements.classificationLearningRememberBtn.textContent = t('rememberClassification');
+  elements.classificationLearningDismissBtn.textContent = t('skipLearning');
+}
+
+async function rememberClassificationLearning() {
+  if (!pendingLearningProposal) return;
+  const proposal = pendingLearningProposal;
+  elements.classificationLearningRememberBtn.disabled = true;
+  try {
+    const learned = SmartFavClassifier.applyDomainLearning(currentSettings, proposal);
+    currentSettings = learned.settings;
+    await storageSet({ settings: currentSettings });
+    pendingLearningProposal = null;
+    elements.classificationLearningPrompt.classList.remove('is-error');
+    elements.classificationLearningPrompt.classList.add('is-saved');
+    elements.classificationLearningTitle.textContent = t('learningSavedTitle');
+    elements.classificationLearningMessage.textContent = t('learningSaved', {
+      domain: learned.domain,
+      category: learned.targetCategory
+    });
+    elements.classificationLearningHint.textContent = t('rememberClassificationHint', {
+      rule: learned.keyword
+    });
+    elements.classificationLearningRememberBtn.hidden = true;
+    elements.classificationLearningDismissBtn.textContent = t('done');
+    announceFavoriteReorder(elements.classificationLearningMessage.textContent);
+  } catch (error) {
+    elements.classificationLearningPrompt.classList.add('is-error');
+    elements.classificationLearningMessage.textContent = t('learningSaveFailed', {
+      message: error && error.message ? error.message : String(error || '')
+    });
+    elements.classificationLearningRememberBtn.disabled = false;
   }
 }
 
@@ -1867,6 +2109,14 @@ elements.favoritesBackBtn.addEventListener('click', () => showView('home'));
 elements.categoriesBackBtn.addEventListener('click', () => showView('home'));
 elements.trashNavBtn.addEventListener('click', () => showView('trash'));
 elements.trashBackBtn.addEventListener('click', () => showView('favorites'));
+elements.classificationLearningDismissBtn.addEventListener(
+  'click',
+  hideClassificationLearningPrompt
+);
+elements.classificationLearningRememberBtn.addEventListener(
+  'click',
+  rememberClassificationLearning
+);
 elements.settingsBtn.addEventListener('click', () => {
   showView(activeView === 'home' ? 'settings' : 'home');
 });
@@ -1875,6 +2125,7 @@ async function showView(view) {
   activeView = ['home', 'favorites', 'categories', 'trash', 'settings'].includes(view)
     ? view
     : 'home';
+  if (activeView !== 'favorites') hideClassificationLearningPrompt();
   elements.mainView.classList.toggle('hidden', activeView !== 'home');
   elements.favoritesView.classList.toggle('hidden', activeView !== 'favorites');
   elements.categoriesView.classList.toggle('hidden', activeView !== 'categories');

@@ -350,6 +350,7 @@ select:focus-visible {
 :root[data-theme="glass"] .header,
 :root[data-theme="glass"] .save-card,
 :root[data-theme="glass"] .content-section,
+:root[data-theme="glass"] .learning-prompt,
 :root[data-theme="glass"] .home-navigation,
 :root[data-theme="glass"] .view-back-row,
 :root[data-theme="glass"] .panel-view,
@@ -497,6 +498,37 @@ select:focus-visible {
   color: var(--success);
 }
 
+.notice-message {
+  min-width: 0;
+  flex: 1;
+}
+
+.notice-action {
+  min-height: 28px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.notice-action:hover,
+.notice-action:focus-visible {
+  background: var(--surface);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.notice-action:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .notice-error {
   border-color: var(--danger-line);
   background: var(--danger-soft);
@@ -587,19 +619,41 @@ select:focus-visible {
   margin: 12px 0 6px;
 }
 
+.classification-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .field-label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 
+.confidence-badge,
 .source-badge {
   padding: 3px 7px;
   border-radius: 999px;
-  background: var(--success-soft);
-  color: var(--success);
   font-size: 10px;
   font-weight: 680;
+}
+
+.source-badge,
+.confidence-badge.confidence-high {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.confidence-badge.confidence-medium {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.confidence-badge.confidence-low {
+  background: var(--surface-soft);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .source-badge.ai {
@@ -662,6 +716,37 @@ select:focus-visible {
   gap: 6px;
   min-height: 6px;
   margin-top: 7px;
+}
+
+.page-learning-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--tag-line);
+  border-radius: 9px;
+  background: var(--tag-bg);
+  cursor: pointer;
+}
+
+.page-learning-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.page-learning-option strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-learning-option small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .tag {
@@ -1073,8 +1158,95 @@ select:focus-visible {
   line-height: 1.45;
 }
 
-.favorites-view .content-section:first-of-type {
+#recentSection {
   border-top: 0;
+}
+
+.learning-prompt {
+  margin: 10px 12px 0;
+  padding: 11px;
+  border: 1px solid var(--tag-line);
+  border-radius: 10px;
+  background: linear-gradient(145deg, var(--tag-bg), var(--surface));
+  color: var(--text);
+  -webkit-backdrop-filter: var(--panel-backdrop-filter);
+  backdrop-filter: var(--panel-backdrop-filter);
+}
+
+.learning-prompt.is-saved {
+  border-color: var(--success-line);
+  background: linear-gradient(145deg, var(--success-soft), var(--surface));
+}
+
+.learning-prompt.is-error {
+  border-color: var(--danger-line);
+  background: linear-gradient(145deg, var(--danger-soft), var(--surface));
+}
+
+.learning-prompt-copy h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.learning-prompt-copy p {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.learning-prompt-copy .learning-prompt-hint {
+  color: var(--muted);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.learning-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.learning-button {
+  min-height: 31px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.learning-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.learning-button-secondary {
+  border-color: var(--control-line);
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+
+.learning-button-secondary:hover,
+.learning-button-secondary:focus-visible {
+  color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.learning-button-primary {
+  background: var(--primary);
+  color: var(--primary-contrast);
+}
+
+.learning-button-primary:hover,
+.learning-button-primary:focus-visible {
+  background: var(--primary-hover);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .trash-entry-button {
@@ -1339,7 +1511,8 @@ select:focus-visible {
 
 .appearance-toggle input[type="checkbox"],
 .compact-toggle input[type="checkbox"],
-.compact-inline-toggle input[type="checkbox"] {
+.compact-inline-toggle input[type="checkbox"],
+.page-learning-option input[type="checkbox"] {
   display: grid;
   flex: 0 0 18px;
   width: 18px;
@@ -1362,7 +1535,8 @@ select:focus-visible {
 
 .appearance-toggle input[type="checkbox"]::after,
 .compact-toggle input[type="checkbox"]::after,
-.compact-inline-toggle input[type="checkbox"]::after {
+.compact-inline-toggle input[type="checkbox"]::after,
+.page-learning-option input[type="checkbox"]::after {
   width: 5px;
   height: 9px;
   border: solid currentColor;
@@ -1375,7 +1549,8 @@ select:focus-visible {
 
 .appearance-toggle input[type="checkbox"]:checked,
 .compact-toggle input[type="checkbox"]:checked,
-.compact-inline-toggle input[type="checkbox"]:checked {
+.compact-inline-toggle input[type="checkbox"]:checked,
+.page-learning-option input[type="checkbox"]:checked {
   border-color: var(--primary);
   background: var(--primary);
   box-shadow: none;
@@ -1383,13 +1558,15 @@ select:focus-visible {
 
 .appearance-toggle input[type="checkbox"]:checked::after,
 .compact-toggle input[type="checkbox"]:checked::after,
-.compact-inline-toggle input[type="checkbox"]:checked::after {
+.compact-inline-toggle input[type="checkbox"]:checked::after,
+.page-learning-option input[type="checkbox"]:checked::after {
   transform: translateY(-1px) rotate(45deg) scale(1);
 }
 
 .appearance-toggle input[type="checkbox"]:focus-visible,
 .compact-toggle input[type="checkbox"]:focus-visible,
-.compact-inline-toggle input[type="checkbox"]:focus-visible {
+.compact-inline-toggle input[type="checkbox"]:focus-visible,
+.page-learning-option input[type="checkbox"]:focus-visible {
   border-color: var(--primary);
   outline: none;
   box-shadow: inset 0 0 0 2px var(--focus-ring);
@@ -1397,7 +1574,8 @@ select:focus-visible {
 
 .appearance-toggle input[type="checkbox"]:disabled,
 .compact-toggle input[type="checkbox"]:disabled,
-.compact-inline-toggle input[type="checkbox"]:disabled {
+.compact-inline-toggle input[type="checkbox"]:disabled,
+.page-learning-option input[type="checkbox"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }

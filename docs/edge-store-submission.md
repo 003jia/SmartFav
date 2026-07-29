@@ -4,14 +4,29 @@
 
 建议英文商店名称使用 **SmartFav - Bookmark Organizer**，中文名称继续使用 **SmartFav - 智能收藏夹**。这样既保留现有品牌，也能让英语用户直接理解用途，避免与大量泛化的 “AI Bookmark Organizer” 名称混在一起。
 
-## 1. 商店截图
+## 1. 商店图片
 
-上传以下 `1280 × 800` PNG 文件：
+### 促销瓷砖
 
-- 中文（简体）：[`smartfav-edge-store-zh-1280x800.png`](store-assets/smartfav-edge-store-zh-1280x800.png)
-- English：[`smartfav-edge-store-en-1280x800.png`](store-assets/smartfav-edge-store-en-1280x800.png)
+- 小型促销瓷砖，`440 × 280` PNG：[`smartfav-small-promo-440x280.png`](store-assets/smartfav-small-promo-440x280.png)
+- 大型促销瓷砖，`1400 × 560` PNG：[`smartfav-large-promo-1400x560.png`](store-assets/smartfav-large-promo-1400x560.png)
 
-在 `Store listings / 商店列表` 中分别进入中文和 English 详情页上传对应图片。Partner Center 当前接受 `640 × 480` 或 `1280 × 800` 的截图，最多 6 张。如果页面只要求至少一张，上传对应语言的第一张即可。
+### 功能截图
+
+当前上传页支持最多 5 张截图，按以下顺序上传这组 `1280 × 800` PNG：
+
+1. [`smartfav-store-01-local-classification-1280x800.png`](store-assets/smartfav-store-01-local-classification-1280x800.png) — 本地规则一键分类
+2. [`smartfav-store-02-favorites-management-1280x800.png`](store-assets/smartfav-store-02-favorites-management-1280x800.png) — 收藏管理、排序与跨分类移动
+3. [`smartfav-store-03-browser-sync-1280x800.png`](store-assets/smartfav-store-03-browser-sync-1280x800.png) — 浏览器收藏夹同步
+4. [`smartfav-store-04-custom-rules-1280x800.png`](store-assets/smartfav-store-04-custom-rules-1280x800.png) — 自定义分类文件夹与关键词
+5. [`smartfav-store-05-layout-backup-1280x800.png`](store-assets/smartfav-store-05-layout-backup-1280x800.png) — 整理前布局备份与还原
+
+如需为 English 商店列表先提供一张全英文截图，可继续使用
+[`smartfav-edge-store-en-1280x800.png`](store-assets/smartfav-edge-store-en-1280x800.png)；中文概览图为
+[`smartfav-edge-store-zh-1280x800.png`](store-assets/smartfav-edge-store-zh-1280x800.png)。
+
+全部成品已汇总到 `docs/store-assets/SmartFav-Store-Assets-1.13.0.zip`。可编辑排版源文件是
+[`store-assets.html`](store-assets/store-assets.html)，真实插件界面素材位于 `store-assets/source/`。
 
 ## 2. 发布方联系邮箱
 
@@ -107,7 +122,8 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 
 - 扩展包：`dist/SmartFav-Edge-1.13.0.zip`
 - 中文与 English 商店列表均填写完整。
-- 至少上传一张商店截图；建议两种语言各上传对应截图。
+- 上传 5 张中文功能截图；English 商店列表至少上传现有英文概览图。
+- 小型与大型促销瓷砖已按上传页标注的精确尺寸准备。
 - 发布方联系邮箱已保存且验证状态为已验证。
 - 隐私政策 URL 可在无登录、无本地环境的情况下公开访问。
 - Privacy 页面填写内容与扩展权限和隐私政策一致。

@@ -26,7 +26,7 @@ const orderUtils = require(path.join(extensionRoot, 'order-utils.js'));
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.13.0');
+  assert.equal(manifest.version, '1.14.1');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -66,6 +66,14 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="categoryFoldersNavBtn"/);
   assert.match(popupHtml, /id="favoritesView"/);
   assert.match(popupHtml, /id="favoritesReorderStatus"[^>]*aria-live="polite"/);
+  assert.match(popupHtml, /id="classificationLearningPrompt"/);
+  assert.match(popupHtml, /id="classificationLearningRememberBtn"/);
+  assert.match(popupHtml, /id="classificationLearningDismissBtn"/);
+  assert.match(popupHtml, /id="confidenceBadge"/);
+  assert.match(popupHtml, /id="pageLearningOption"/);
+  assert.match(popupHtml, /id="pageLearningCheckbox"/);
+  assert.match(popupHtml, /id="pageLearningUndoBtn"/);
+  assert.doesNotMatch(popupHtml, /id="categorySummary"[^>]*data-i18n=/);
   assert.match(popupHtml, /id="categoriesView"/);
   assert.match(popupHtml, /id="trashView"/);
   assert.match(popupHtml, /id="favoritesBackBtn"/);
@@ -188,6 +196,14 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /class="favorite-move-select"/);
   assert.match(popupJs, /sendRuntimeMessage\('moveFavoriteToCategory'/);
   assert.match(popupJs, /SmartFavOrder\.moveFavoriteAcrossCategories/);
+  assert.match(popupJs, /SmartFavClassifier\.createDomainLearningProposal\(/);
+  assert.match(popupJs, /SmartFavClassifier\.applyDomainLearning\(/);
+  assert.match(popupJs, /SmartFavClassifier\.revertDomainLearning\(/);
+  assert.match(popupJs, /elements\.pageLearningCheckbox\.checked = !isFallback/);
+  assert.match(popupJs, /suggestedCategory: recommendedCategory/);
+  assert.match(popupJs, /manuallyCategorized: selectedCategory !== recommendedCategory/);
+  assert.match(popupJs, /schedulePopupClose\(learningResult \? 6500 : 1300\)/);
+  assert.match(popupJs, /await storageSet\(\{ settings: currentSettings \}\)/);
   assert.match(
     popupJs,
     /class="favorite-row favorite-row-card\$\{inFolder \? ' favorite-row-in-folder' : ''\}"/
@@ -255,12 +271,16 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /\.favorite-row-card\s*\{/);
   assert.match(popupCss, /\.favorite-row-card \.recent-title\s*\{[^}]*-webkit-line-clamp:\s*2;/s);
   assert.match(popupCss, /\.favorite-row-card \.favorite-delete-button\s*\{[^}]*min-width:\s*48px;/s);
+  assert.match(popupCss, /\.learning-prompt\s*\{/);
+  assert.match(popupCss, /\.confidence-badge\.confidence-high\s*\{/);
+  assert.match(popupCss, /\.page-learning-option\s*\{/);
+  assert.match(popupCss, /\.notice-action\s*\{/);
   assert.match(popupCss, /\.reorder-grip\s*\{/);
   assert.match(popupCss, /\.folder-item\.is-drop-before,/);
   assert.match(popupCss, /\.favorite-row-in-folder\.is-drop-before\s*\{/);
   assert.match(
     popupCss,
-    /\.appearance-toggle input\[type="checkbox"\],[\s\S]{0,180}\.compact-inline-toggle input\[type="checkbox"\]\s*\{[^}]*flex:\s*0 0 18px;[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*appearance:\s*none;/s
+    /\.appearance-toggle input\[type="checkbox"\],[\s\S]{0,320}\.page-learning-option input\[type="checkbox"\]\s*\{[^}]*flex:\s*0 0 18px;[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*appearance:\s*none;/s
   );
   assert.match(
     popupCss,
@@ -453,6 +473,7 @@ function verifyBilingualClassification() {
   );
   assert.equal(customResult.category, 'Design');
   assert.deepEqual(customResult.tags, ['figma', 'interface']);
+  assert.equal(customResult.confidence, 'high');
 
   const customFolderResult = classifier.classify(
     {
@@ -522,6 +543,115 @@ function verifyBilingualClassification() {
   assert.equal(vectorResult.method, 'vector');
   assert.ok(vectorResult.score > 4);
   assert.ok(vectorResult.scoreRatios['AI Research'] > vectorResult.scoreRatios.Cooking);
+
+  assert.equal(
+    classifier.normalizeDomain('https://www.docs.example.com/guide'),
+    'docs.example.com'
+  );
+  assert.equal(classifier.parseDomainRule('domain:docs.example.com'), 'docs.example.com');
+  assert.equal(classifier.buildKeywordIndex({
+    Research: ['domain:docs.example.com', 'research']
+  }).has('domain:docs.example.com'), false);
+
+  const learningSettings = {
+    language: 'en',
+    categories: ['Programming', 'Research', 'Other'],
+    keywordRules: {
+      Programming: ['code', 'domain:docs.example.com'],
+      Research: ['research'],
+      Other: []
+    }
+  };
+  const learningProposal = classifier.createDomainLearningProposal(
+    {
+      title: 'Example documentation',
+      url: 'https://docs.example.com/guide'
+    },
+    'Research',
+    learningSettings
+  );
+  assert.equal(learningProposal.keyword, 'domain:docs.example.com');
+  assert.deepEqual(learningProposal.previousCategories, ['Programming']);
+  const learned = classifier.applyDomainLearning(learningSettings, learningProposal);
+  assert.ok(learned.settings.keywordRules.Research.includes('domain:docs.example.com'));
+  assert.ok(!learned.settings.keywordRules.Programming.includes('domain:docs.example.com'));
+  assert.ok(learningSettings.keywordRules.Programming.includes('domain:docs.example.com'));
+  const revertedLearning = classifier.revertDomainLearning(learned.settings, learned);
+  assert.deepEqual(
+    revertedLearning.keywordRules,
+    classifier.mergeRules(
+      learningSettings.categories,
+      learningSettings.keywordRules,
+      learningSettings.language
+    )
+  );
+  assert.throws(
+    () => classifier.revertDomainLearning(learned.settings, {}),
+    /Invalid domain learning rollback/
+  );
+
+  const domainResult = classifier.classify(
+    {
+      title: 'An unrelated title',
+      url: 'https://api.docs.example.com/reference',
+      description: ''
+    },
+    learned.settings
+  );
+  assert.equal(domainResult.category, 'Research');
+  assert.equal(domainResult.matchType, 'domain');
+  assert.equal(domainResult.confidence, 'high');
+  assert.deepEqual(domainResult.tags, ['docs.example.com']);
+  assert.match(domainResult.summary, /remembered domain rule/);
+  const vectorDomainResult = classifier.classify(
+    {
+      title: 'Code and programming reference',
+      url: 'https://api.docs.example.com/reference',
+      description: 'javascript python developer'
+    },
+    {
+      ...learned.settings,
+      classificationMode: 'vector'
+    }
+  );
+  assert.equal(vectorDomainResult.category, 'Research');
+  assert.equal(vectorDomainResult.matchType, 'domain');
+  assert.equal(vectorDomainResult.confidence, 'high');
+  assert.equal(
+    classifier.createDomainLearningProposal(
+      { url: 'https://docs.example.com/another' },
+      'Research',
+      learned.settings
+    ),
+    null
+  );
+  assert.equal(
+    classifier.createDomainLearningProposal(
+      { url: 'chrome://extensions' },
+      'Research',
+      learned.settings
+    ),
+    null
+  );
+
+  const fallbackResult = classifier.classify(
+    {
+      title: 'Unrelated page',
+      url: 'https://unknown.example/',
+      description: ''
+    },
+    {
+      language: 'en',
+      categories: ['Research', 'Other'],
+      keywordRules: { Research: ['quantum'], Other: [] }
+    }
+  );
+  assert.equal(fallbackResult.category, 'Other');
+  assert.equal(fallbackResult.confidence, 'low');
+  assert.equal(i18n.translate('zh_CN', 'confidenceHigh'), '把握高');
+  assert.equal(i18n.translate('en', 'rememberClassification'), 'Remember');
+  assert.equal(i18n.translate('zh_CN', 'undoRemember'), '撤销记住');
+  assert.equal(i18n.translate('en', 'rememberManualCategory'), 'Remember this website category too');
 }
 
 async function verifyAIProtocols() {
