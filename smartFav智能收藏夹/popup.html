@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.8.0">
+  <link rel="stylesheet" href="styles/popup.css?v=1.13.0">
 </head>
 <body>
   <div class="app-shell">
@@ -124,6 +124,7 @@
         </div>
         <div class="folders-list" id="foldersList"></div>
       </section>
+      <p id="favoritesReorderStatus" class="visually-hidden" role="status" aria-live="polite"></p>
     </section>
 
     <section id="categoriesView" class="panel-view categories-view hidden" aria-labelledby="categoryManagerTitle">
@@ -152,6 +153,7 @@
           >
           <button id="compactAddCategoryBtn" type="button" data-i18n="addCategory">添加</button>
         </div>
+        <p id="keywordSeparatorHint" class="category-keyword-hint" data-i18n="keywordSeparatorHint">多个关键词请用英文逗号分隔；也支持中文逗号、分号或换行，并会自动转换。</p>
         <div id="categoryRulesList" class="category-rules-list"></div>
       </div>
 
@@ -251,7 +253,23 @@
             <option value="minimax">MiniMax</option>
             <option value="deepseek">DeepSeek</option>
             <option value="openai">OpenAI</option>
+            <option value="openai_compatible" data-i18n="openAICompatibleApi">OpenAI 兼容 API</option>
+            <option value="anthropic_compatible" data-i18n="anthropicCompatibleApi">Anthropic 兼容 API</option>
           </select>
+        </label>
+
+        <label class="compact-field hidden" id="compactApiEndpointField" for="compactApiEndpoint">
+          <span data-i18n="apiEndpoint">API 地址</span>
+          <input
+            id="compactApiEndpoint"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            data-i18n-placeholder="apiEndpointPlaceholder"
+            placeholder="完整接口地址"
+          >
+          <small class="compact-field-hint" data-i18n="apiEndpointHint">更改或测试时，只请求这个站点的访问权限</small>
         </label>
 
         <label class="compact-field" for="compactModel">
@@ -303,7 +321,7 @@
       <label class="compact-toggle" for="compactBrowserBookmarksEnabled">
         <span>
           <strong data-i18n="browserBookmarks">同步浏览器收藏夹</strong>
-          <small data-i18n="browserBookmarksHint">在 SmartFav 收藏或删除时，同步维护浏览器中的 SmartFav 分类</small>
+          <small data-i18n="browserBookmarksHint">在 SmartFav 收藏或删除，或手动排序时维护浏览器分类；浏览器删除最后一条同网址书签时同步移入最近删除</small>
         </span>
         <input id="compactBrowserBookmarksEnabled" type="checkbox">
       </label>
@@ -327,7 +345,7 @@
       <label class="compact-toggle" for="compactBookmarkAutoCapture">
         <span>
           <strong data-i18n="autoCaptureBookmarks">自动获取浏览器收藏</strong>
-          <small data-i18n="autoCaptureBookmarksHint">点击星标后自动加入 SmartFav；允许整理时同时移动到浏览器分类</small>
+          <small data-i18n="autoCaptureBookmarksHint">点击星标后自动分类并提示结果；删除最后一条同网址书签时移入最近删除</small>
         </span>
         <input id="compactBookmarkAutoCapture" type="checkbox">
       </label>
@@ -336,15 +354,40 @@
         <p class="compact-note" data-i18n="browserFolderNote">整理只移动网址收藏，不删除内容；SmartFav 文件夹内的记录不会重复处理。</p>
       </div>
 
+      <section class="bookmark-backup-panel" aria-labelledby="bookmarkBackupTitle">
+        <div class="bookmark-backup-heading">
+          <span>
+            <strong id="bookmarkBackupTitle" data-i18n="bookmarkRestorePoint">整理前布局备份</strong>
+            <small data-i18n="bookmarkRestorePointHint">仅记录移动前仍在 SmartFav 外的书签；已分类的旧书签可读取，但浏览器不提供其整理前路径。</small>
+          </span>
+          <span id="bookmarkBackupBadge" class="bookmark-backup-badge" data-i18n="bookmarkRestoreEmptyBadge">暂无备份</span>
+        </div>
+        <p id="bookmarkBackupSummary" class="bookmark-backup-summary" data-i18n="bookmarkRestoreEmpty">当前没有布局备份。首次移动未整理书签前会自动创建。</p>
+        <div class="bookmark-backup-actions bookmark-backup-actions-primary">
+          <button id="bookmarkBackupCreateBtn" type="button" data-i18n="bookmarkRestoreCreate">重新扫描</button>
+          <button id="bookmarkBackupPreviewBtn" type="button" data-i18n="bookmarkRestorePreview">查看可还原项</button>
+          <button id="bookmarkBackupRestoreBtn" class="bookmark-restore-button" type="button" data-i18n="bookmarkRestoreNow">还原整理前位置</button>
+        </div>
+        <div class="bookmark-backup-actions bookmark-backup-actions-secondary">
+          <button id="bookmarkBackupExportBtn" type="button" data-i18n="bookmarkRestoreExport">导出布局备份</button>
+          <label class="bookmark-backup-import" for="bookmarkBackupImportInput">
+            <span data-i18n="bookmarkRestoreImport">导入布局备份</span>
+            <input id="bookmarkBackupImportInput" type="file" accept="application/json,.json">
+          </label>
+        </div>
+        <div id="bookmarkBackupStatus" class="bookmark-backup-status" role="status" aria-live="polite"></div>
+        <p class="bookmark-backup-warning" data-i18n="bookmarkRestoreUninstallWarning">浏览器不允许扩展在卸载后自动还原。卸载前请手动还原，或导出 JSON 布局备份。</p>
+      </section>
+
       <div id="compactSettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
-      <button class="button button-primary compact-save" id="compactSaveBtn" type="button" data-i18n="saveSettings">保存设置</button>
     </section>
   </div>
 
-  <script src="i18n.js?v=1.8.0"></script>
-  <script src="classifier.js?v=1.8.0"></script>
-  <script src="browser-bookmarks.js?v=1.8.0"></script>
-  <script src="ai-client.js?v=1.8.0"></script>
-  <script src="popup.js?v=1.8.0"></script>
+  <script src="i18n.js?v=1.13.0"></script>
+  <script src="classifier.js?v=1.13.0"></script>
+  <script src="browser-bookmarks.js?v=1.13.0"></script>
+  <script src="ai-client.js?v=1.13.0"></script>
+  <script src="order-utils.js?v=1.13.0"></script>
+  <script src="popup.js?v=1.13.0"></script>
 </body>
 </html>

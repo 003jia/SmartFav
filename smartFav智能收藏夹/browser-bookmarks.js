@@ -153,6 +153,214 @@
     return { status: 'ok', moved };
   }
 
+  // 将 SmartFav 本地收藏跨分类移动时，只移动浏览器 SmartFav 目录内的同网址记录。
+  // 同网址存在多个受管副本时全部移动；外部普通收藏不受影响。
+  async function moveManagedFavorite(url, targetCategory, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) {
+      return { status: 'disabled', moved: 0, matched: 0, missing: 0 };
+    }
+    if (!api) {
+      return { status: 'unavailable', moved: 0, matched: 0, missing: 0 };
+    }
+
+    const normalizedUrl = String(url || '').trim();
+    const category = String(targetCategory || '').trim();
+    if (!normalizedUrl || !category) {
+      return { status: 'invalid', moved: 0, matched: 0, missing: 0 };
+    }
+
+    const matches = (await collectManagedBookmarks(api))
+      .filter((node) => node.url === normalizedUrl);
+    if (!matches.length) {
+      return { status: 'missing', moved: 0, matched: 0, missing: 1 };
+    }
+
+    const root = await findOrCreateRoot(api);
+    const targetFolder = await findOrCreateCategory(api, root.id, category);
+    let moved = 0;
+    for (const node of matches) {
+      if (node.parentId === targetFolder.id) continue;
+      await callApi(api, 'move', node.id, { parentId: targetFolder.id });
+      moved += 1;
+    }
+    return {
+      status: 'ok',
+      moved,
+      matched: matches.length,
+      missing: 0,
+      category
+    };
+  }
+
+  function normalizeOrderedValues(values) {
+    const seen = new Set();
+    return (Array.isArray(values) ? values : [])
+      .map((value) => String(value || '').trim())
+      .filter((value) => {
+        if (!value || seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      });
+  }
+
+  async function moveNodesToFront(api, parentId, orderedNodes) {
+    let moved = 0;
+    for (let index = 0; index < orderedNodes.length; index += 1) {
+      const node = orderedNodes[index];
+      const children = await callApi(api, 'getChildren', parentId);
+      const currentIndex = (children || []).findIndex((item) => item.id === node.id);
+      if (currentIndex < 0 || currentIndex === index) continue;
+      await callApi(api, 'move', node.id, { parentId, index });
+      moved += 1;
+    }
+    return moved;
+  }
+
+  // 手动调整分类顺序后，只重排 SmartFav 根目录下已经存在的同名分类文件夹。
+  // 不创建空文件夹，也不改变未知文件夹或普通书签之间的相对顺序。
+  async function reorderManagedCategories(categories, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) {
+      return { status: 'disabled', moved: 0, matched: 0, missing: 0 };
+    }
+    if (!api) {
+      return { status: 'unavailable', moved: 0, matched: 0, missing: 0 };
+    }
+
+    const orderedCategories = normalizeOrderedValues(categories);
+    const root = await findRoot(api);
+    if (!root) {
+      return {
+        status: 'missing',
+        moved: 0,
+        matched: 0,
+        missing: orderedCategories.length
+      };
+    }
+
+    const children = await callApi(api, 'getChildren', root.id);
+    const firstFolderByTitle = new Map();
+    (children || []).forEach((node) => {
+      if (!node.url && !firstFolderByTitle.has(node.title)) {
+        firstFolderByTitle.set(node.title, node);
+      }
+    });
+    const orderedNodes = orderedCategories
+      .map((category) => firstFolderByTitle.get(category))
+      .filter(Boolean);
+    const moved = await moveNodesToFront(api, root.id, orderedNodes);
+    return {
+      status: 'ok',
+      moved,
+      matched: orderedNodes.length,
+      missing: orderedCategories.length - orderedNodes.length
+    };
+  }
+
+  // 手动调整分类内书签顺序后，只重排该分类文件夹中已经存在的同网址书签。
+  // 同网址有多个副本时保留全部副本及其相对顺序；未匹配书签和子文件夹保留在其后。
+  async function reorderManagedFavorites(category, orderedUrls, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) {
+      return { status: 'disabled', moved: 0, matched: 0, missing: 0 };
+    }
+    if (!api) {
+      return { status: 'unavailable', moved: 0, matched: 0, missing: 0 };
+    }
+
+    const normalizedCategory = String(category || '').trim();
+    const urls = normalizeOrderedValues(orderedUrls);
+    if (!normalizedCategory || !urls.length) {
+      return { status: 'ok', moved: 0, matched: 0, missing: urls.length };
+    }
+
+    const root = await findRoot(api);
+    if (!root) {
+      return { status: 'missing', moved: 0, matched: 0, missing: urls.length };
+    }
+    const rootChildren = await callApi(api, 'getChildren', root.id);
+    const categoryFolder = (rootChildren || [])
+      .find((node) => !node.url && node.title === normalizedCategory);
+    if (!categoryFolder) {
+      return { status: 'missing', moved: 0, matched: 0, missing: urls.length };
+    }
+
+    const children = await callApi(api, 'getChildren', categoryFolder.id);
+    const requestedUrls = new Set(urls);
+    const nodesByUrl = new Map();
+    (children || []).forEach((node) => {
+      if (!node.url || !requestedUrls.has(node.url)) return;
+      const matches = nodesByUrl.get(node.url) || [];
+      matches.push(node);
+      nodesByUrl.set(node.url, matches);
+    });
+    const orderedNodes = urls.flatMap((url) => nodesByUrl.get(url) || []);
+    const moved = await moveNodesToFront(api, categoryFolder.id, orderedNodes);
+    const matched = urls.filter((url) => nodesByUrl.has(url)).length;
+    return {
+      status: 'ok',
+      moved,
+      matched,
+      missing: urls.length - matched
+    };
+  }
+
+  async function syncManagedOrder(order = {}, settings = {}, api) {
+    if (!settings.browserBookmarksEnabled) {
+      return {
+        status: 'disabled',
+        moved: 0,
+        matched: 0,
+        missing: 0,
+        categoryFoldersMoved: 0,
+        favoritesMoved: 0
+      };
+    }
+    if (!api) {
+      return {
+        status: 'unavailable',
+        moved: 0,
+        matched: 0,
+        missing: 0,
+        categoryFoldersMoved: 0,
+        favoritesMoved: 0
+      };
+    }
+
+    const categoryResult = Array.isArray(order.categories)
+      ? await reorderManagedCategories(order.categories, settings, api)
+      : null;
+    const favoriteResult = order.category && Array.isArray(order.orderedUrls)
+      ? await reorderManagedFavorites(order.category, order.orderedUrls, settings, api)
+      : null;
+    const results = [categoryResult, favoriteResult].filter(Boolean);
+    if (!results.length) {
+      return {
+        status: 'invalid',
+        moved: 0,
+        matched: 0,
+        missing: 0,
+        categoryFoldersMoved: 0,
+        favoritesMoved: 0
+      };
+    }
+    const status = results.some((result) => result.status === 'unavailable')
+      ? 'unavailable'
+      : results.every((result) => result.status === 'missing')
+        ? 'missing'
+        : results.some((result) => result.status === 'disabled')
+          ? 'disabled'
+          : 'ok';
+    const categoryFoldersMoved = categoryResult ? categoryResult.moved : 0;
+    const favoritesMoved = favoriteResult ? favoriteResult.moved : 0;
+    return {
+      status,
+      moved: categoryFoldersMoved + favoritesMoved,
+      matched: results.reduce((total, result) => total + result.matched, 0),
+      missing: results.reduce((total, result) => total + result.missing, 0),
+      categoryFoldersMoved,
+      favoritesMoved
+    };
+  }
+
   // 收集浏览器收藏夹中所有不在 SmartFav 文件夹内的书签
   async function collectExternalBookmarks(api) {
     const tree = await callApi(api, 'getTree');
@@ -219,6 +427,38 @@
     return false;
   }
 
+  // 读取一个浏览器书签当前所在的 SmartFav 顶层分类。
+  // 书签可位于分类内的子文件夹中，但直接放在 SmartFav 根目录时不视为有效分类。
+  async function getManagedBookmarkInfo(api, bookmarkId) {
+    if (!api) return { status: 'unavailable', node: null, category: '' };
+    const nodes = await callApi(api, 'get', bookmarkId);
+    const node = nodes && nodes[0];
+    if (!node || !node.url) {
+      return { status: 'unsupported', node: node || null, category: '' };
+    }
+
+    const roots = await findRoots(api);
+    const rootIds = new Set(roots.map((root) => root.id));
+    if (!rootIds.size) return { status: 'outside', node, category: '' };
+
+    let current = node;
+    const visited = new Set([String(node.id)]);
+    while (current && current.parentId && !visited.has(String(current.parentId))) {
+      const parents = await callApi(api, 'get', current.parentId);
+      const parent = parents && parents[0];
+      if (!parent) break;
+      if (rootIds.has(parent.id)) {
+        const category = current.url ? '' : String(current.title || '').trim();
+        return category
+          ? { status: 'ok', node, category }
+          : { status: 'root', node, category: '' };
+      }
+      visited.add(String(parent.id));
+      current = parent;
+    }
+    return { status: 'outside', node, category: '' };
+  }
+
   // 将浏览器中已存在的书签移动到 SmartFav/分类 文件夹
   async function placeBookmarkInCategory(api, bookmarkId, category) {
     if (!api) return { status: 'unavailable' };
@@ -274,9 +514,14 @@
     writeFavorite,
     removeFavorite,
     syncManagedCategories,
+    moveManagedFavorite,
+    reorderManagedCategories,
+    reorderManagedFavorites,
+    syncManagedOrder,
     collectExternalBookmarks,
     collectManagedBookmarks,
     isInsideSmartFavFolder,
+    getManagedBookmarkInfo,
     placeBookmarkInCategory,
     organizeBookmarks
   };

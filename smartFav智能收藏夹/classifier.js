@@ -53,6 +53,65 @@
       .trim();
   }
 
+  function splitKeywords(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(value
+        .map((keyword) => String(keyword || '').trim())
+        .filter(Boolean))];
+    }
+
+    const keywords = [];
+    let token = '';
+    let quote = '';
+    const pushToken = () => {
+      const keyword = token.trim();
+      token = '';
+      if (keyword && !keywords.includes(keyword)) keywords.push(keyword);
+    };
+
+    const source = String(value || '');
+    for (let index = 0; index < source.length; index += 1) {
+      const character = source[index];
+      if (quote) {
+        if (
+          character === '\\'
+          && index + 1 < source.length
+          && (source[index + 1] === quote || source[index + 1] === '\\')
+        ) {
+          token += source[index + 1];
+          index += 1;
+        } else if (character === quote) {
+          quote = '';
+        } else {
+          token += character;
+        }
+        continue;
+      }
+
+      if ((character === '"' || character === "'") && !token) {
+        quote = character;
+      } else if (/[\s,，;；]/u.test(character)) {
+        pushToken();
+      } else {
+        token += character;
+      }
+    }
+    pushToken();
+    return keywords;
+  }
+
+  function formatKeywords(value) {
+    return splitKeywords(value)
+      .map((keyword) => {
+        if (!/[\s,，;；]/u.test(keyword)) return keyword;
+        const escaped = keyword
+          .replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"');
+        return `"${escaped}"`;
+      })
+      .join(', ');
+  }
+
   function mergeRules(categories, customRules, language = 'zh_CN') {
     const defaults = getDefaults(language).keywordRules;
     return categories.reduce((result, category) => {
@@ -263,7 +322,7 @@
   function rulesToText(categories, rules, language = 'zh_CN') {
     const merged = mergeRules(categories, rules, language);
     return categories
-      .map((category) => `${category}=${merged[category].join(', ')}`)
+      .map((category) => `${category}=${formatKeywords(merged[category])}`)
       .join('\n');
   }
 
@@ -274,10 +333,7 @@
       if (separator < 1) return;
       const category = line.slice(0, separator).trim();
       if (!categories.includes(category)) return;
-      result[category] = line.slice(separator + 1)
-        .split(/[,，]/)
-        .map((keyword) => keyword.trim())
-        .filter(Boolean);
+      result[category] = splitKeywords(line.slice(separator + 1));
     });
     return mergeRules(categories, result, language);
   }
@@ -294,6 +350,8 @@
     mergeRules,
     normalizeWeights,
     tokenizeVectorText,
+    splitKeywords,
+    formatKeywords,
     rulesToText,
     textToRules
   };

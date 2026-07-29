@@ -1,6 +1,8 @@
 # SmartFav Microsoft Edge Add-ons 提交清单
 
-本清单对应 SmartFav 1.8.0。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
+本清单对应 SmartFav 1.13.0。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
+
+建议英文商店名称使用 **SmartFav - Bookmark Organizer**，中文名称继续使用 **SmartFav - 智能收藏夹**。这样既保留现有品牌，也能让英语用户直接理解用途，避免与大量泛化的 “AI Bookmark Organizer” 名称混在一起。
 
 ## 1. 商店截图
 
@@ -51,7 +53,7 @@ English:
 
 `storage`
 
-> 在 Microsoft Edge 本地保存 SmartFav 收藏、分类规则、界面设置、最近删除内容、可选背景图和用户填写的 AI 配置。数据不通过该权限上传给发布方。
+> 在 Microsoft Edge 本地保存 SmartFav 收藏、分类规则、界面设置、最近删除内容、整理前布局备份、可选背景图和用户填写的 AI 配置。布局备份记录书签 ID、标题、网址、原文件夹路径和顺序，用于用户预览或还原整理前布局；数据不通过该权限上传给发布方。
 
 `activeTab`
 
@@ -63,15 +65,23 @@ English:
 
 `bookmarks`
 
-> 为三个默认关闭的可选功能读取和维护 Microsoft Edge 收藏夹：同步 SmartFav 受管理分类、经用户授权整理现有收藏、自动获取用户新建的收藏。
+> 为三个默认关闭的可选功能读取和维护 Microsoft Edge 收藏夹：同步 SmartFav 受管理分类、经用户授权整理现有收藏、自动获取用户新建的收藏。整理或自动移动前先记录原文件夹与顺序；用户可预览并把仍存在的书签移回原位置。启用同步或自动获取后，监听书签删除事件；仅当浏览器中已无同网址副本时，才把对应 SmartFav 收藏移入本地“最近删除”。
 
 `alarms`
 
 > 每小时触发一次本地清理，永久删除在“最近删除”中已超过 7 天的 SmartFav 记录。
 
+`notifications`
+
+> 用户开启自动获取浏览器收藏后，在新建星标完成本地分类时显示一条本机系统通知，告知目标分类文件夹。通知内容不发送给发布方或第三方。
+
 AI 服务域名：
 
-> 仅在用户开启 AI 增强或主动测试连接时，连接用户选择的 Ollama、OpenRouter、MiniMax、DeepSeek 或 OpenAI 服务。请求用于返回分类结果；扩展不会从这些地址加载或执行代码。
+> 仅在用户开启 AI 增强或主动测试连接时，连接用户选择的 Ollama、OpenRouter、MiniMax、DeepSeek、OpenAI，或用户配置的 OpenAI / Anthropic 兼容接口。请求只用于返回分类结果；扩展不会从这些地址加载或执行代码。
+
+可选主机权限：
+
+> OpenAI / Anthropic 兼容接口的域名由用户填写，无法在发布时预先确定。扩展声明可选 HTTPS 主机范围，但只在用户更改兼容接口或点击“测试连接”时，请求所填写 API 主机的访问权限；远程接口必须使用 HTTPS，本机 HTTP 仅限 localhost 或 127.0.0.1。该权限不会用于读取网页或加载远程代码。
 
 ### Are you using remote code? / 是否使用远程代码
 
@@ -87,6 +97,7 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 
 - 当前网页的网址、标题、描述摘要和关键词。
 - SmartFav 收藏及 Microsoft Edge 收藏夹信息。
+- 整理前保存在本地的布局备份，包括书签 ID、网址、标题、原文件夹路径和顺序。
 - 用户主动填写并保存在本地的 AI API Key 和设置。
 - 用户开启 AI 后，向所选服务商发送的分类请求数据。
 
@@ -94,7 +105,7 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 
 ## 5. 最终检查
 
-- 扩展包：`dist/SmartFav-Edge-1.8.0.zip`
+- 扩展包：`dist/SmartFav-Edge-1.13.0.zip`
 - 中文与 English 商店列表均填写完整。
 - 至少上传一张商店截图；建议两种语言各上传对应截图。
 - 发布方联系邮箱已保存且验证状态为已验证。

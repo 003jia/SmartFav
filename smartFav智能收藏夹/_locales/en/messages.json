@@ -1,11 +1,11 @@
 {
   "extensionName": {
-    "message": "SmartFav - Smart Favorites"
+    "message": "SmartFav - Bookmark Organizer"
   },
   "extensionDescription": {
-    "message": "A local-first smart favorites extension with optional AI enhancement"
+    "message": "A local-first bookmark organizer with editable rules, browser sync, and optional OpenAI- or Anthropic-compatible AI"
   },
   "actionTitle": {
-    "message": "Save the current page"
+    "message": "Save and organize the current page with SmartFav"
   }
 }

@@ -1,56 +1,118 @@
 # SmartFav 智能收藏夹
 
-一款本地优先、AI 可选增强的 Chrome / Edge 浏览器收藏插件，支持中英文界面和浏览器原生收藏夹同步。
+<p align="center">
+  <img src="docs/github-assets/smartfav-github-hero.jpg" alt="SmartFav — Local-first bookmark organizer" width="100%">
+</p>
 
-点击插件图标后，SmartFav 会打开 Edge / Chrome 原生工具栏插件弹窗，并根据网页标题、网站标签、网址和描述自动建议分类。无需注册账号，也不需要配置 AI；需要更智能的判断时，可按需启用本机 Ollama、OpenRouter 免费路由或自己的模型 API Key。
+<p align="center">
+  本地优先、AI 可选增强的 Chrome / Edge 书签整理插件。
+  <br>
+  A local-first bookmark organizer with optional AI, bilingual UI, browser sync, and layout backup.
+</p>
 
-![SmartFav 原生浏览器插件弹窗](docs/smartfav-popup.png)
+<p align="center">
+  <a href="dist/SmartFav-Edge-1.13.0.zip"><strong>下载 1.13.0</strong></a>
+  ·
+  <a href="#安装">安装说明</a>
+  ·
+  <a href="smartFav智能收藏夹/README.md">完整使用文档</a>
+  ·
+  <a href="PRIVACY.md">隐私政策</a>
+</p>
 
-## Microsoft Edge 商店发布
+## 产品定位
 
-- [隐私政策（中英双语）](PRIVACY.md)
-- [Edge Add-ons 提交清单与可直接粘贴的权限说明](docs/edge-store-submission.md)
-- [中文商店截图（1280 × 800）](docs/store-assets/smartfav-edge-store-zh-1280x800.png)
-- [English store screenshot (1280 × 800)](docs/store-assets/smartfav-edge-store-en-1280x800.png)
+SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独立窗口。它会根据当前网页的标题、网址、网站标签和描述建议分类；基础分类完全在浏览器本地运行，不要求注册账号或配置 API Key。
 
-公开的隐私政策地址：
+需要更智能的判断时，可以按需启用本机 Ollama、现成云服务，或填写兼容 OpenAI Chat Completions / Anthropic Messages 的接口地址、模型与 API Key。AI 始终是可选增强，不会阻断基础收藏流程。
 
-<https://github.com/003jia/SmartFav/blob/main/PRIVACY.md>
+<p align="center">
+  <img src="docs/github-assets/smartfav-feature-overview.jpg" alt="SmartFav 本地分类、收藏管理和浏览器同步功能概览" width="100%">
+</p>
 
-## 特点
+## 核心能力
 
-- **无需 AI 也能使用**：本地关键词权重或关键词向量匹配完成基础分类，默认不上传网页内容。
-- **原生工具栏弹窗**：点击插件图标打开，点击弹窗外部即可关闭，不注入网页也不创建独立窗口。
-- **弹窗尺寸可调**：宽度支持 320–520px，高度支持 420–600px，收藏、分类和设置仍保持紧凑。
-- **独立功能界面**：主页只负责收藏当前网页，“我的收藏”和“分类文件夹”分别进入独立界面。
-- **明确返回路径**：“我的收藏”和“分类文件夹”内容区顶部均有返回主页按钮。
-- **统一品牌图标**：工具栏和弹窗标题区使用同一套多尺寸 SmartFav 图标。
-- **方形外框**：使用浏览器原生矩形画布，不再处理外层圆角、透明底板或悬浮窗尺寸同步。
-- **界面风格与背景**：支持五种主题、明暗模式和本地自定义背景图片；黑色风格固定使用白字暗色。
-- **自定义分类文件夹**：在独立分类界面新增或删除文件夹，并为每个文件夹单独填写关键词规则。
-- **已有收藏重新分类**：保存新文件夹或关键词规则后，自动重新检查全部 SmartFav 收藏并更新分类。
-- **最近删除**：删除的收藏默认保留 7 天，可恢复或立即永久删除，到期后由后台自动清理。
-- **中英文切换**：顶栏可即时切换中文和英文，Edge 商店也能识别两个语言版本。
-- **浏览器收藏夹双向同步**：开启同步后，收藏会写入浏览器，删除也会同步移除 `SmartFav / 分类` 中的同网址记录。
-- **安全整理**：关闭整理权限时只导入 SmartFav；开启后才会把浏览器原收藏移动到 `SmartFav / 分类`。
-- **升级自动恢复**：重新加载或重新安装后，会从浏览器已有的 `SmartFav / 分类` 恢复收藏和自定义分类。
-- **结果可解释**：显示分类来源和命中的关键词，收藏前可以手动修改。
-- **AI 按需增强**：支持自动分类、创建新分类文件夹，并把本地标签比例和规则证据交给模型判断。
-- **分类策略可选**：可使用标签比例权重，或对分类文件夹中的关键词做本地向量相似度匹配。
-- **规则可以自定义**：可编辑收藏分类与对应关键词。
-- **避免重复收藏**：再次保存相同网址时自动更新原记录。
+### 本地分类与自定义规则
+
+- 无需 AI 即可使用关键词权重或本地向量相似度匹配。
+- 可创建、删除分类文件夹，并为每个文件夹单独维护关键词。
+- 支持空格、中文或英文逗号、分号和换行输入；英文双引号可保留带空格词组。
+- 新增分类或修改规则后，会重新检查已有 SmartFav 收藏。
+
+### 收藏管理
+
+- “我的收藏”和“分类文件夹”使用独立紧凑界面。
+- 收藏以卡片展示标题、分类与网站域名。
+- 分类文件夹和分类内书签均支持鼠标拖动及 `Alt + 方向键` 排序。
+- 分类内单条书签可通过“移动”菜单跨分类转移。
+- 删除内容进入“最近删除”，默认保留 7 天，可恢复或立即永久删除。
+- 弹窗宽高、五种界面风格、明暗模式和自定义背景图均可调整。
+
+### 浏览器收藏夹同步
+
+- SmartFav 收藏或删除时，可同步维护浏览器 `SmartFav / 分类`。
+- 浏览器新建星标后，可自动获取、分类并用系统通知提示目标文件夹。
+- 浏览器删除最后一条同网址书签时，对应 SmartFav 收藏会进入“最近删除”。
+- 开启同步后，手动调整的分类及书签顺序会写回浏览器收藏夹。
+- 在浏览器 `SmartFav / 分类` 间移动书签时，SmartFav 分类会实时跟随更新。
+- 批量整理和自动移动前可创建布局备份，支持预览、还原、JSON 导入与导出。
+
+同步和整理默认关闭。SmartFav 只在用户开启相应功能后读取或移动浏览器书签；排序写回仅移动已经存在的 SmartFav 受管项目，不创建空文件夹，也不改动 SmartFav 目录外的书签。
+
+## 下载
+
+当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
+
+- [`SmartFav-Edge-1.13.0.zip`](dist/SmartFav-Edge-1.13.0.zip)：Manifest V3 扩展包。
+- [`SmartFav-Edge-1.13.0.sha256`](dist/SmartFav-Edge-1.13.0.sha256)：安装包 SHA-256 校验文件。
+- 历史正式版本可在 [GitHub Releases](https://github.com/003jia/SmartFav/releases) 查看。
+
+> 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
 
 ## 安装
 
-1. 下载或克隆本仓库。
-2. 打开 `chrome://extensions/` 或 `edge://extensions/`。
-3. 开启“开发者模式”，点击“加载已解压的扩展程序”。
-4. 选择仓库中的 `smartFav智能收藏夹` 文件夹。
+1. 下载 `SmartFav-Edge-1.13.0.zip` 并解压。
+2. 打开 `edge://extensions/` 或 `chrome://extensions/`。
+3. 开启“开发者模式”。
+4. 点击“加载已解压的扩展程序”。
+5. 选择解压后包含 `manifest.json` 的目录。
 
-安装后点击工具栏中的 SmartFav 图标即可打开原生插件弹窗。普通 `http://` 或 `https://` 网页可以收藏；`edge://`、扩展商店和其他浏览器保护页面仍可打开插件并查看已有收藏与设置，但浏览器不允许读取或收藏该页面。
+安装完成后，点击工具栏中的 SmartFav 图标即可打开插件。普通 `http://` 或 `https://` 网页可以收藏；`edge://`、`chrome://`、扩展商店和其他浏览器保护页面仍可查看已有收藏与设置，但浏览器不允许扩展读取或收藏这些页面。
 
-AI 默认关闭。开启后可选择自动优化当前网页分类，也可以关闭自动模式，仅在点击“AI 优化”时调用所选模型服务；允许 AI 创建分类文件夹时，只有现有分类都不合适才会新增分类。
+## 1.13.0 更新
 
-三个浏览器收藏夹开关默认均关闭并会在切换后立即保存。星标自动获取可以只保存到 SmartFav；开启“允许整理浏览器收藏夹”后会立即整理现有收藏，之后新增星标也会自动归类。“覆盖同网址”会在整个浏览器收藏夹范围内去重，不再局限于 `SmartFav` 文件夹。整理不会删除非重复网址收藏。
+- 分类内部每条书签新增“移动”菜单，可直接跨分类转移并立即更新数量与顺序。
+- 开启同步后，SmartFav 跨分类移动会同步写回浏览器中的受管书签。
+- 用户在浏览器 `SmartFav / 分类` 间移动书签时，SmartFav 会实时更新本地分类。
+- 关键词输入新增空格分隔；`"machine learning"` 这类双引号词组仍作为一个完整关键词。
+- 移动事件与插件自身的整理、排序操作相互隔离，避免重复同步和错误提示。
+- 320px、360px 小窗及暗色模式已完成交互验证。
 
-更多配置和关键词规则说明见 [扩展使用文档](smartFav智能收藏夹/README.md)。
+完整版本记录见 [扩展使用文档](smartFav智能收藏夹/README.md#版本记录)。
+
+## 中英文与商店发布
+
+- [隐私政策（中英双语）](PRIVACY.md)
+- [Microsoft Edge Add-ons 提交清单](docs/edge-store-submission.md)
+- [中文商店截图（1280 × 800）](docs/store-assets/smartfav-edge-store-zh-1280x800.png)
+- [English store screenshot (1280 × 800)](docs/store-assets/smartfav-edge-store-en-1280x800.png)
+
+公开隐私政策地址：
+
+<https://github.com/003jia/SmartFav/blob/main/PRIVACY.md>
+
+## 开发与验证
+
+扩展源码位于 `smartFav智能收藏夹`，`manifest.json` 位于该目录根部。
+
+```bash
+node --check smartFav智能收藏夹/browser-bookmarks.js
+node --check smartFav智能收藏夹/background.js
+node --check smartFav智能收藏夹/popup.js
+node --check smartFav智能收藏夹/classifier.js
+node --check smartFav智能收藏夹/order-utils.js
+node tests/verify-extension.js
+unzip -t dist/SmartFav-Edge-1.13.0.zip
+```
+
+1.13.0 已通过以上语法检查、扩展自动化验证和 ZIP 完整性检查。
