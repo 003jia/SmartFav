@@ -331,7 +331,16 @@ function storageGet(keys) {
     keys.forEach((key) => { result[key] = previewState[key]; });
     return Promise.resolve(result);
   }
-  return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      const runtimeError = chrome.runtime && chrome.runtime.lastError;
+      if (runtimeError) {
+        reject(new Error(runtimeError.message));
+        return;
+      }
+      resolve(result || {});
+    });
+  });
 }
 
 function storageSet(values) {
@@ -349,6 +358,59 @@ function storageSet(values) {
       resolve();
     });
   });
+}
+
+async function updateStoredSettings(settingsPatch) {
+  if (!isExtension) {
+    const settings = { ...(previewState.settings || {}), ...settingsPatch };
+    await storageSet({ settings });
+    return settings;
+  }
+  const response = await sendRuntimeMessage('updateSettings', { patch: settingsPatch });
+  if (!response || response.status !== 'ok' || !response.settings) {
+    throw new Error(
+      response && response.message ? response.message : 'Settings update failed'
+    );
+  }
+  return response.settings;
+}
+
+async function updateStoredFavoriteOrder(category, orderedUrls) {
+  if (!isExtension) {
+    const result = await storageGet(['favoriteOrder']);
+    const nextFavoriteOrder = {
+      ...(result.favoriteOrder || {}),
+      [category]: orderedUrls
+    };
+    await storageSet({ favoriteOrder: nextFavoriteOrder });
+    return nextFavoriteOrder;
+  }
+  const response = await sendRuntimeMessage('updateFavoriteOrder', {
+    category,
+    orderedUrls
+  });
+  if (!response || response.status !== 'ok' || !response.favoriteOrder) {
+    throw new Error(
+      response && response.message ? response.message : 'Favorite order update failed'
+    );
+  }
+  return response.favoriteOrder;
+}
+
+async function consumeStoredBrowserActivity(activityId) {
+  if (!isExtension) {
+    const current = previewState.pendingBrowserActivity;
+    if (current && current.id === activityId) {
+      await storageSet({ pendingBrowserActivity: null });
+    }
+    return;
+  }
+  const response = await sendRuntimeMessage('consumePendingBrowserActivity', { activityId });
+  if (!response || response.status !== 'ok') {
+    throw new Error(
+      response && response.message ? response.message : 'Browser activity update failed'
+    );
+  }
 }
 
 function summarizePreviewRestorePoint(point) {
@@ -543,7 +605,7 @@ async function showBrowserActivity(activity) {
   const createdAt = Number(activity.createdAt) || 0;
   const expiresAt = Number(activity.expiresAt) || createdAt + BROWSER_ACTIVITY_TTL_MS;
   if (!createdAt || expiresAt <= Date.now()) {
-    await storageSet({ pendingBrowserActivity: null });
+    await consumeStoredBrowserActivity(activity.id);
     return false;
   }
   const message = getBrowserActivityMessage(activity);
@@ -552,7 +614,7 @@ async function showBrowserActivity(activity) {
   currentBrowserActivity = activity;
   elements.successMsg.textContent = message;
   elements.successStatus.classList.remove('hidden');
-  await storageSet({ pendingBrowserActivity: null });
+  await consumeStoredBrowserActivity(activity.id);
   return true;
 }
 
@@ -678,7 +740,7 @@ async function loadSettings() {
     || typeof saved.bookmarkOrganizeEnabled !== 'boolean'
     || typeof saved.bookmarkAutoCaptureEnabled !== 'boolean'
     || !saved.bookmarkWriteMode;
-  if (needsMigration) await storageSet({ settings });
+  if (needsMigration) return updateStoredSettings(settings);
   return settings;
 }
 
@@ -753,11 +815,9 @@ function applyLanguage() {
 
 async function toggleColorMode() {
   if (currentSettings.themeStyle === 'black') return;
-  currentSettings = {
-    ...currentSettings,
+  currentSettings = await updateStoredSettings({
     colorMode: currentSettings.colorMode === 'dark' ? 'light' : 'dark'
-  };
-  await storageSet({ settings: currentSettings });
+  });
   applyAppearance();
   if (activeView === 'settings') {
     elements.compactThemeStyle.value = normalizeThemeStyle(currentSettings.themeStyle);
@@ -790,7 +850,11 @@ async function switchLanguage() {
       ? nextDefaults.keywordRules
       : SmartFavClassifier.mergeRules(currentSettings.categories, currentSettings.keywordRules, nextLanguage)
   };
-  await storageSet({ settings: currentSettings });
+  currentSettings = await updateStoredSettings({
+    language: currentSettings.language,
+    categories: currentSettings.categories,
+    keywordRules: currentSettings.keywordRules
+  });
   try {
     await reclassifyStoredFavorites();
   } catch (error) {
@@ -1094,7 +1158,7 @@ async function applyAIResponse(response) {
       ...(Array.isArray(parsed.tags) ? parsed.tags : [])
     ];
     const keywords = splitKeywords(proposedKeywords.join(',')).slice(0, 16);
-    currentSettings = {
+    const nextSettings = {
       ...currentSettings,
       categories: [...currentSettings.categories, requestedCategory],
       keywordRules: {
@@ -1102,7 +1166,10 @@ async function applyAIResponse(response) {
         [requestedCategory]: keywords
       }
     };
-    await storageSet({ settings: currentSettings });
+    currentSettings = await updateStoredSettings({
+      categories: nextSettings.categories,
+      keywordRules: nextSettings.keywordRules
+    });
     category = requestedCategory;
     createdCategory = requestedCategory;
   }
@@ -1150,14 +1217,16 @@ elements.confirmBtn.addEventListener('click', async () => {
     if (isExtension) {
       const response = await sendRuntimeMessage('saveFavorite', {
         favorite,
-        settingsPatch: learningResult ? { ...learningResult.settings } : null
+        settingsPatch: learningResult
+          ? { keywordRules: learningResult.settings.keywordRules }
+          : null
       });
       if (!response || response.status !== 'ok') {
         throw new Error(response && response.message
           ? response.message
           : t('browserBookmarkUnavailable'));
       }
-      if (learningResult) currentSettings = learningResult.settings;
+      if (learningResult) currentSettings = response.settings || learningResult.settings;
       const bookmarkStatus = (response.bookmark && response.bookmark.status) || 'disabled';
       if (bookmarkStatus === 'unavailable' || bookmarkStatus === 'error') {
         successKey = 'savedBrowserFailed';
@@ -1219,8 +1288,9 @@ async function undoPageLearning() {
       currentSettings,
       learningResult
     );
-    await storageSet({ settings: revertedSettings });
-    currentSettings = revertedSettings;
+    currentSettings = await updateStoredSettings({
+      keywordRules: revertedSettings.keywordRules
+    });
     pendingPageLearningUndo = null;
     elements.successMsg.textContent = t('learningUndone', {
       category: learningResult.targetCategory
@@ -1385,7 +1455,7 @@ async function persistCategoryOrder(nextCategories, movedCategory) {
     ...currentSettings,
     categories: nextCategories
   };
-  await storageSet({ settings: currentSettings });
+  currentSettings = await updateStoredSettings({ categories: nextCategories });
   await renderFolders();
   focusReorderedItem(elements.foldersList, '.folder-item', 'category', movedCategory);
   const message = t('categoryOrderUpdated', {
@@ -1880,8 +1950,9 @@ async function rememberClassificationLearning() {
   elements.classificationLearningRememberBtn.disabled = true;
   try {
     const learned = SmartFavClassifier.applyDomainLearning(currentSettings, proposal);
-    currentSettings = learned.settings;
-    await storageSet({ settings: currentSettings });
+    currentSettings = await updateStoredSettings({
+      keywordRules: learned.settings.keywordRules
+    });
     pendingLearningProposal = null;
     elements.classificationLearningPrompt.classList.remove('is-error');
     elements.classificationLearningPrompt.classList.add('is-saved');
@@ -1913,11 +1984,7 @@ async function saveFavoriteOrder(category, nextUrls, movedUrl, favorites, favori
   ).map((favorite) => favorite.url);
   if (nextUrls.join('\u0000') === currentUrls.join('\u0000')) return;
 
-  const nextFavoriteOrder = {
-    ...favoriteOrder,
-    [category]: nextUrls
-  };
-  await storageSet({ favoriteOrder: nextFavoriteOrder });
+  const nextFavoriteOrder = await updateStoredFavoriteOrder(category, nextUrls);
   activeFavoriteOrder = nextFavoriteOrder;
   showFavoritesByCategory(category, favorites, nextFavoriteOrder);
   focusReorderedItem(elements.foldersList, '.favorite-link', 'url', movedUrl);
@@ -2727,13 +2794,13 @@ async function persistSettingsPatch(
   } = {}
 ) {
   currentSettings = { ...currentSettings, ...patch };
-  const settingsSnapshot = { ...currentSettings };
   const saveTask = settingsSaveQueue
     .catch(() => undefined)
-    .then(() => storageSet({ settings: settingsSnapshot }));
+    .then(() => updateStoredSettings(patch));
   settingsSaveQueue = saveTask;
   try {
-    await saveTask;
+    const savedSettings = await saveTask;
+    if (settingsSaveQueue === saveTask) currentSettings = savedSettings;
     if (applyAppearanceNow) applyAppearance();
     if (refreshSuggestion && currentTabInfo) {
       currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
@@ -3206,7 +3273,7 @@ elements.categorySaveBtn.addEventListener('click', async () => {
       ...currentSettings,
       ...classificationSettings
     };
-    await storageSet({ settings: currentSettings });
+    currentSettings = await updateStoredSettings(classificationSettings);
     const result = await reclassifyStoredFavorites();
     await Promise.all([renderFolders(), renderRecentFavorites()]);
     if (currentTabInfo) {

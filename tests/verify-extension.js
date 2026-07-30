@@ -28,7 +28,7 @@ const constants = require(path.join(extensionRoot, 'constants.js'));
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.14.2');
+  assert.equal(manifest.version, '1.14.3');
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -213,7 +213,9 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /suggestedCategory: recommendedCategory/);
   assert.match(popupJs, /manuallyCategorized: selectedCategory !== recommendedCategory/);
   assert.match(popupJs, /schedulePopupClose\(learningResult \? 6500 : 1300\)/);
-  assert.match(popupJs, /await storageSet\(\{ settings: currentSettings \}\)/);
+  assert.match(popupJs, /async function updateStoredSettings\(settingsPatch\)/);
+  assert.match(popupJs, /sendRuntimeMessage\('updateSettings', \{ patch: settingsPatch \}\)/);
+  assert.match(backgroundJs, /message\.type === 'updateSettings'/);
   assert.match(
     popupJs,
     /class="favorite-row favorite-row-card\$\{inFolder \? ' favorite-row-in-folder' : ''\}"/
@@ -223,7 +225,8 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /SmartFavOrder\.reorderValues/);
   assert.match(popupJs, /SmartFavOrder\.reorderFavoriteUrls/);
   assert.match(popupJs, /SmartFavOrder\.moveFavoriteUrl/);
-  assert.match(popupJs, /storageSet\(\{ favoriteOrder: nextFavoriteOrder \}\)/);
+  assert.match(popupJs, /async function updateStoredFavoriteOrder\(category, orderedUrls\)/);
+  assert.match(backgroundJs, /message\.type === 'updateFavoriteOrder'/);
   assert.match(popupJs, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/);
   assert.match(
     popupHtml,
@@ -1658,18 +1661,39 @@ function createBackgroundHarness(
       local: {
         get(keys, callback) {
           const requested = Array.isArray(keys) ? keys : Object.keys(keys || {});
-          callback(Object.fromEntries(requested.map((key) => [key, state[key]])));
+          const snapshot = Object.fromEntries(requested.map((key) => [key, state[key]]));
+          const respond = () => {
+            if (options.storageReadError) {
+              chromeMock.runtime.lastError = { message: options.storageReadError };
+              callback(undefined);
+              chromeMock.runtime.lastError = null;
+              return;
+            }
+            callback(snapshot);
+          };
+          if (options.storageDelay) {
+            setImmediate(respond);
+          } else {
+            respond();
+          }
         },
         set(values, callback) {
-          // storageWriteError 用于模拟配额超限：回调照常触发，但置位 lastError。
-          if (options.storageWriteError) {
-            chromeMock.runtime.lastError = { message: options.storageWriteError };
+          const respond = () => {
+            // storageWriteError 用于模拟配额超限：回调照常触发，但置位 lastError。
+            if (options.storageWriteError) {
+              chromeMock.runtime.lastError = { message: options.storageWriteError };
+              if (callback) callback();
+              chromeMock.runtime.lastError = null;
+              return;
+            }
+            Object.assign(state, values);
             if (callback) callback();
-            chromeMock.runtime.lastError = null;
-            return;
+          };
+          if (options.storageDelay) {
+            setImmediate(respond);
+          } else {
+            respond();
           }
-          Object.assign(state, values);
-          if (callback) callback();
         }
       },
       // session 区：内部书签操作标记的权威存储，worker 回收后仍然有效。
@@ -1878,6 +1902,203 @@ async function verifySaveFavoriteConsistency() {
   assert.equal(invalidHarness.state.favorites.length, 0);
 }
 
+async function verifyCrossEntryConsistency() {
+  const enDefaults = classifier.getDefaults('en');
+  const baseSettings = {
+    language: 'en',
+    themeStyle: 'glass',
+    colorMode: 'light',
+    popupWidth: 360,
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: false,
+    bookmarkWriteMode: 'overwrite',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: false
+  };
+
+  // Popup 保存与浏览器星标自动采集必须共享同一状态锁。storage 延迟让两条路径
+  // 真正重叠；若 onCreated 只走独立 eventQueue，最终只会剩下一条收藏。
+  const captureHarness = createBackgroundHarness(
+    { ...baseSettings, bookmarkAutoCaptureEnabled: true },
+    [],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const browserCreated = await createBookmark(captureHarness.bookmarks, {
+    title: 'Browser-created bookmark',
+    url: 'https://cross-entry.example.com/browser'
+  });
+  const popupSave = sendBackgroundMessage(captureHarness, {
+    type: 'saveFavorite',
+    favorite: {
+      title: 'Popup favorite',
+      url: 'https://cross-entry.example.com/popup',
+      category: 'Tools',
+      createdAt: 1
+    }
+  });
+  captureHarness.listeners.onCreated(browserCreated.id, browserCreated);
+  const popupSaveResult = await popupSave;
+  await flushBackgroundEvents();
+  assert.equal(popupSaveResult.status, 'ok');
+  assert.deepEqual(
+    Array.from(captureHarness.state.favorites, (item) => item.url).sort(),
+    [
+      'https://cross-entry.example.com/browser',
+      'https://cross-entry.example.com/popup'
+    ]
+  );
+
+  // 用户删除旧收藏与保存新收藏同时发生时，新收藏不能被旧快照覆盖，
+  // 被删条目也必须完整进入最近删除。
+  const deleteUrl = 'https://cross-entry.example.com/delete';
+  const deleteHarness = createBackgroundHarness(
+    baseSettings,
+    [{ title: 'Delete me', url: deleteUrl, category: 'Tools', createdAt: 1 }],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const [concurrentSave, concurrentDelete] = await Promise.all([
+    sendBackgroundMessage(deleteHarness, {
+      type: 'saveFavorite',
+      favorite: {
+        title: 'Keep me',
+        url: 'https://cross-entry.example.com/keep',
+        category: 'Learning',
+        createdAt: 2
+      }
+    }),
+    sendBackgroundMessage(deleteHarness, { type: 'deleteFavorite', url: deleteUrl })
+  ]);
+  assert.equal(concurrentSave.status, 'ok');
+  assert.equal(concurrentDelete.status, 'ok');
+  assert.deepEqual(
+    Array.from(deleteHarness.state.favorites, (item) => item.url),
+    ['https://cross-entry.example.com/keep']
+  );
+  assert.equal(deleteHarness.state.recentlyDeleted.length, 1);
+  assert.equal(deleteHarness.state.recentlyDeleted[0].url, deleteUrl);
+
+  // 浏览器侧删除回流与 popup 保存同时发生，也必须保留新收藏并把旧收藏入回收站。
+  const browserDeleteUrl = 'https://cross-entry.example.com/browser-delete';
+  const browserDeleteHarness = createBackgroundHarness(
+    { ...baseSettings, browserBookmarksEnabled: true },
+    [{
+      title: 'Browser delete',
+      url: browserDeleteUrl,
+      category: 'Tools',
+      createdAt: 1
+    }],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const browserDeleteNode = await createBookmark(browserDeleteHarness.bookmarks, {
+    title: 'Browser delete',
+    url: browserDeleteUrl
+  });
+  const browserConcurrentSave = sendBackgroundMessage(browserDeleteHarness, {
+    type: 'saveFavorite',
+    favorite: {
+      title: 'Survives browser deletion',
+      url: 'https://cross-entry.example.com/survives',
+      category: 'Learning',
+      createdAt: 2
+    }
+  });
+  const browserDeletion = fireBookmarkRemoved(
+    browserDeleteHarness,
+    browserDeleteNode.id
+  );
+  await Promise.all([browserConcurrentSave, browserDeletion]);
+  await flushBackgroundEvents();
+  assert.deepEqual(
+    Array.from(browserDeleteHarness.state.favorites, (item) => item.url),
+    ['https://cross-entry.example.com/survives']
+  );
+  assert.equal(browserDeleteHarness.state.recentlyDeleted.length, 1);
+  assert.equal(browserDeleteHarness.state.recentlyDeleted[0].url, browserDeleteUrl);
+
+  // 两个设置补丁只能合并各自字段，不能用旧的整份 settings 互相覆盖。
+  const settingsHarness = createBackgroundHarness(
+    baseSettings,
+    [],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const [modeUpdate, widthUpdate] = await Promise.all([
+    sendBackgroundMessage(settingsHarness, {
+      type: 'updateSettings',
+      patch: { colorMode: 'dark' }
+    }),
+    sendBackgroundMessage(settingsHarness, {
+      type: 'updateSettings',
+      patch: { popupWidth: 420 }
+    })
+  ]);
+  assert.equal(modeUpdate.status, 'ok');
+  assert.equal(widthUpdate.status, 'ok');
+  assert.equal(settingsHarness.state.settings.colorMode, 'dark');
+  assert.equal(settingsHarness.state.settings.popupWidth, 420);
+
+  // 不同分类的排序更新必须基于最新 favoriteOrder 合并。
+  const orderHarness = createBackgroundHarness(
+    baseSettings,
+    [],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  await Promise.all([
+    sendBackgroundMessage(orderHarness, {
+      type: 'updateFavoriteOrder',
+      category: 'Tools',
+      orderedUrls: ['https://order.example.com/tool']
+    }),
+    sendBackgroundMessage(orderHarness, {
+      type: 'updateFavoriteOrder',
+      category: 'Learning',
+      orderedUrls: ['https://order.example.com/learn']
+    })
+  ]);
+  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder.Tools), [
+    'https://order.example.com/tool'
+  ]);
+  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder.Learning), [
+    'https://order.example.com/learn'
+  ]);
+
+  // 旧弹窗只能消费自己展示的活动，不能清掉随后到达的新活动。
+  const activityHarness = createBackgroundHarness(baseSettings);
+  activityHarness.state.pendingBrowserActivity = {
+    id: 'activity-new',
+    type: 'classified',
+    createdAt: Date.now()
+  };
+  const staleConsume = await sendBackgroundMessage(activityHarness, {
+    type: 'consumePendingBrowserActivity',
+    activityId: 'activity-old'
+  });
+  assert.equal(staleConsume.status, 'ok');
+  assert.equal(staleConsume.consumed, false);
+  assert.equal(activityHarness.state.pendingBrowserActivity.id, 'activity-new');
+  const matchingConsume = await sendBackgroundMessage(activityHarness, {
+    type: 'consumePendingBrowserActivity',
+    activityId: 'activity-new'
+  });
+  assert.equal(matchingConsume.consumed, true);
+  assert.equal(activityHarness.state.pendingBrowserActivity, null);
+}
+
 async function verifyStorageWriteFailures() {
   const enDefaults = classifier.getDefaults('en');
   const baseSettings = {
@@ -1923,6 +2144,30 @@ async function verifyStorageWriteFailures() {
   assert.equal(deleteResponse.status, 'error');
   assert.equal(deleteHarness.state.favorites.length, 1);
   assert.equal(deleteHarness.state.recentlyDeleted.length, 0);
+
+  // 读取失败同样必须显式报错，不能把空对象误当成真实的空收藏状态再覆盖数据。
+  const readFailHarness = createBackgroundHarness(
+    { ...baseSettings },
+    [{ title: 'Preserve me', url: 'https://read-fail.example.com/', category: 'Tools' }],
+    [],
+    [],
+    {},
+    { storageReadError: 'Storage backend unavailable' }
+  );
+  const readFailResponse = await sendBackgroundMessage(readFailHarness, {
+    type: 'saveFavorite',
+    favorite: {
+      title: 'Must not overwrite',
+      url: 'https://read-fail.example.com/new',
+      category: 'Learning'
+    }
+  });
+  assert.equal(readFailResponse.status, 'error');
+  assert.match(readFailResponse.message, /unavailable/i);
+  assert.deepEqual(
+    Array.from(readFailHarness.state.favorites, (item) => item.url),
+    ['https://read-fail.example.com/']
+  );
 }
 
 async function verifyInternalMarkPersistence() {
@@ -2786,6 +3031,7 @@ async function main() {
   await verifyBookmarkRestorePoints();
   await verifyBackgroundBookmarkFlows();
   await verifySaveFavoriteConsistency();
+  await verifyCrossEntryConsistency();
   await verifyStorageWriteFailures();
   await verifyInternalMarkPersistence();
   console.log('SmartFav extension verification passed.');

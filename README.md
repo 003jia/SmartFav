@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="dist/SmartFav-Edge-1.14.2.zip"><strong>下载 1.14.2</strong></a>
+  <a href="dist/SmartFav-Edge-1.14.3.zip"><strong>下载 1.14.3</strong></a>
   ·
   <a href="#安装">安装说明</a>
   ·
@@ -61,14 +61,14 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
 
-- [`SmartFav-Edge-1.14.2.zip`](dist/SmartFav-Edge-1.14.2.zip)：Manifest V3 扩展包。
+- [`SmartFav-Edge-1.14.3.zip`](dist/SmartFav-Edge-1.14.3.zip)：Manifest V3 扩展包。
 - 公开仓库只保留当前版本安装包，不长期存放历史二进制文件。
 
 > 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
 
 ## 安装
 
-1. 下载 `SmartFav-Edge-1.14.2.zip` 并解压。
+1. 下载 `SmartFav-Edge-1.14.3.zip` 并解压。
 2. 打开 `edge://extensions/` 或 `chrome://extensions/`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
@@ -76,8 +76,13 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 安装完成后，点击工具栏中的 SmartFav 图标即可打开插件。普通 `http://` 或 `https://` 网页可以收藏；`edge://`、`chrome://`、扩展商店和其他浏览器保护页面仍可查看已有收藏与设置，但浏览器不允许扩展读取或收藏这些页面。
 
-## 1.14.2 更新
+## 1.14.3 更新
 
+- 收藏保存、浏览器星标自动采集、浏览器删除回流、回收站、重新分类、设置和排序写入统一进入后台状态事务队列，避免并发读改写互相覆盖。
+- 设置页不再直接覆盖整份本地状态；不同设置补丁和不同分类排序可安全合并。
+- 浏览器活动提示按活动 ID 消费，旧弹窗不会清掉随后到达的新通知。
+- storage 读取与写入均显式检查浏览器错误，配额或存储异常不会再被误报为成功。
+- 新增跨入口并发、浏览器删除回流、设置合并、排序合并和读取故障行为测试。
 - “分类文件夹”新增“AI 分析并填入”，复用当前配置的 Ollama、OpenRouter、OpenAI、Anthropic 兼容接口等服务。
 - 每个非空文件夹最多选取 12 条代表性收藏，只发送文件夹名、已有普通关键词、标题、域名和不含查询参数的网址路径。
 - 文件夹较多时按 5 个一批调用；只有全部批次成功后才修改界面，失败时原匹配字段保持不变。
@@ -120,7 +125,8 @@ node --check smartFav智能收藏夹/ai-keyword-suggestions.js
 node --check smartFav智能收藏夹/background.js
 node --check smartFav智能收藏夹/popup.js
 node tests/verify-extension.js
-unzip -t dist/SmartFav-Edge-1.14.2.zip
+unzip -t dist/SmartFav-Edge-1.14.3.zip
+node tests/verify-release-package.js dist/SmartFav-Edge-1.14.3.zip
 ```
 
-1.14.2 已通过以上语法检查、扩展自动化验证和 ZIP 完整性检查。
+1.14.3 已通过以上语法检查、扩展自动化验证、跨入口并发压力验证、发布包源码一致性检查和 ZIP 完整性检查。

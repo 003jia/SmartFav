@@ -21,6 +21,9 @@ const internallyMovedBookmarkIds = new Map();
 // worker 被回收后队列会重置。队列内的任务本身满足"失败即中止、不留半状态"，
 // 因此重置只会丢弃尚未开始的任务，不会留下半完成的书签结构。
 let bookmarkEventQueue = Promise.resolve();
+// 所有会读改写 settings / favorites / favoriteOrder / recentlyDeleted，
+// 或会改变浏览器书签布局的任务，都必须进入同一条队列。事件队列只负责
+// 保持浏览器事件先后顺序，真正的状态事务仍由 bookmarkLayoutQueue 串行化。
 let bookmarkLayoutQueue = Promise.resolve();
 
 const INTERNAL_REMOVE_KEY = 'internalBookmarkRemovals';
@@ -280,21 +283,21 @@ chrome.runtime.onInstalled.addListener((details) => {
       keywordRules: localizedDefaults.keywordRules
     };
     
-    chrome.storage.local.set({
+    setStoredStateChecked({
       settings: defaultSettings,
       favorites: [],
       favoriteOrder: {},
       recentlyDeleted: [],
       bookmarkRestorePoints: [],
       pendingBrowserActivity: null
-    });
-    
-    console.log('SmartFav 已安装');
+    })
+      .then(() => console.log('SmartFav 已安装'))
+      .catch((error) => console.error('SmartFav initialization failed:', error));
   }
 });
 
 function getStoredState() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     chrome.storage.local.get(
       [
         'settings',
@@ -305,19 +308,27 @@ function getStoredState() {
         'pendingBrowserActivity'
       ],
       (result) => {
+        const runtimeError = chrome.runtime && chrome.runtime.lastError;
+        if (runtimeError) {
+          reject(new Error(runtimeError.message));
+          return;
+        }
+        const safeResult = result || {};
         resolve({
-          settings: result.settings || {},
-          favorites: Array.isArray(result.favorites) ? result.favorites : [],
-          favoriteOrder: result.favoriteOrder
-            && typeof result.favoriteOrder === 'object'
-            && !Array.isArray(result.favoriteOrder)
-            ? result.favoriteOrder
+          settings: safeResult.settings || {},
+          favorites: Array.isArray(safeResult.favorites) ? safeResult.favorites : [],
+          favoriteOrder: safeResult.favoriteOrder
+            && typeof safeResult.favoriteOrder === 'object'
+            && !Array.isArray(safeResult.favoriteOrder)
+            ? safeResult.favoriteOrder
             : {},
-          recentlyDeleted: Array.isArray(result.recentlyDeleted) ? result.recentlyDeleted : [],
-          bookmarkRestorePoints: Array.isArray(result.bookmarkRestorePoints)
-            ? result.bookmarkRestorePoints
+          recentlyDeleted: Array.isArray(safeResult.recentlyDeleted)
+            ? safeResult.recentlyDeleted
             : [],
-          pendingBrowserActivity: result.pendingBrowserActivity || null
+          bookmarkRestorePoints: Array.isArray(safeResult.bookmarkRestorePoints)
+            ? safeResult.bookmarkRestorePoints
+            : [],
+          pendingBrowserActivity: safeResult.pendingBrowserActivity || null
         });
       }
     );
@@ -356,7 +367,11 @@ function createTrashEntry(favorite, now = Date.now()) {
   };
 }
 
-async function cleanupRecentlyDeleted(now = Date.now()) {
+function cleanupRecentlyDeleted(now = Date.now()) {
+  return withBookmarkLayoutLock(() => cleanupRecentlyDeletedUnlocked(now));
+}
+
+async function cleanupRecentlyDeletedUnlocked(now = Date.now()) {
   const { recentlyDeleted } = await getStoredState();
   const retained = recentlyDeleted.filter((item) => getTrashExpireAt(item, now) > now);
   const removed = recentlyDeleted.length - retained.length;
@@ -368,7 +383,11 @@ async function getRecentlyDeleted() {
   return cleanupRecentlyDeleted();
 }
 
-async function permanentlyDeleteFavorite(trashId) {
+function permanentlyDeleteFavorite(trashId) {
+  return withBookmarkLayoutLock(() => permanentlyDeleteFavoriteUnlocked(trashId));
+}
+
+async function permanentlyDeleteFavoriteUnlocked(trashId) {
   const normalizedId = String(trashId || '').trim();
   const { recentlyDeleted } = await getStoredState();
   const nextRecentlyDeleted = recentlyDeleted.filter((item) => item.trashId !== normalizedId);
@@ -377,7 +396,11 @@ async function permanentlyDeleteFavorite(trashId) {
   return { status: 'ok', removed, items: nextRecentlyDeleted };
 }
 
-async function restoreDeletedFavorite(trashId) {
+function restoreDeletedFavorite(trashId) {
+  return withBookmarkLayoutLock(() => restoreDeletedFavoriteUnlocked(trashId));
+}
+
+async function restoreDeletedFavoriteUnlocked(trashId) {
   const normalizedId = String(trashId || '').trim();
   const { settings, favorites, recentlyDeleted } = await getStoredState();
   const entry = recentlyDeleted.find((item) => item.trashId === normalizedId);
@@ -425,7 +448,11 @@ async function restoreDeletedFavorite(trashId) {
 // 扩展被移除后重新加载、或换目录加载时，chrome.storage 可能是空的，
 // 但旧版本整理到浏览器 SmartFav/分类 下的网址仍然存在。
 // 启动弹窗时从这些受管目录恢复缺失记录，并保留原文件夹分类。
-async function recoverManagedFavorites() {
+function recoverManagedFavorites() {
+  return withBookmarkLayoutLock(recoverManagedFavoritesUnlocked);
+}
+
+async function recoverManagedFavoritesUnlocked() {
   const { settings, favorites } = await getStoredState();
   if (!chrome.bookmarks) {
     return { status: 'unavailable', recovered: 0, total: 0, favorites };
@@ -508,7 +535,11 @@ async function recoverManagedFavorites() {
 
 // 删除由 SmartFav 管理的收藏。开启浏览器同步时，先删除浏览器侧记录；
 // 只有浏览器操作成功后才更新本地 storage，避免两边状态失配。
-async function deleteFavorite(url) {
+function deleteFavorite(url) {
+  return withBookmarkLayoutLock(() => deleteFavoriteUnlocked(url));
+}
+
+async function deleteFavoriteUnlocked(url) {
   const normalizedUrl = String(url || '').trim();
   if (!normalizedUrl) return { status: 'invalid', removed: 0, browserRemoved: 0 };
 
@@ -585,9 +616,74 @@ async function saveFavoriteEntry(favorite, settingsPatch) {
   });
 }
 
+function updateSettings(settingsPatch) {
+  return withBookmarkLayoutLock(() => updateSettingsUnlocked(settingsPatch));
+}
+
+async function updateSettingsUnlocked(settingsPatch) {
+  if (
+    !settingsPatch
+    || typeof settingsPatch !== 'object'
+    || Array.isArray(settingsPatch)
+  ) {
+    throw new Error('Settings patch must be an object');
+  }
+  const { settings } = await getStoredState();
+  const nextSettings = { ...settings, ...settingsPatch };
+  await setStoredStateChecked({ settings: nextSettings });
+  return { status: 'ok', settings: nextSettings };
+}
+
+function updateFavoriteOrder(category, orderedUrls) {
+  return withBookmarkLayoutLock(() => updateFavoriteOrderUnlocked(category, orderedUrls));
+}
+
+async function updateFavoriteOrderUnlocked(category, orderedUrls) {
+  const normalizedCategory = String(category || '').trim();
+  if (!normalizedCategory || !Array.isArray(orderedUrls)) {
+    throw new Error('Favorite order requires a category and an ordered URL list');
+  }
+  const normalizedUrls = [...new Set(
+    orderedUrls.map((url) => String(url || '').trim()).filter(Boolean)
+  )];
+  const { favoriteOrder } = await getStoredState();
+  const nextFavoriteOrder = { ...favoriteOrder };
+  if (normalizedUrls.length) {
+    nextFavoriteOrder[normalizedCategory] = normalizedUrls;
+  } else {
+    delete nextFavoriteOrder[normalizedCategory];
+  }
+  await setStoredStateChecked({ favoriteOrder: nextFavoriteOrder });
+  return { status: 'ok', favoriteOrder: nextFavoriteOrder };
+}
+
+function consumePendingBrowserActivity(activityId) {
+  return withBookmarkLayoutLock(async () => {
+    const normalizedId = String(activityId || '').trim();
+    const { pendingBrowserActivity } = await getStoredState();
+    if (
+      !pendingBrowserActivity
+      || !normalizedId
+      || pendingBrowserActivity.id !== normalizedId
+    ) {
+      return {
+        status: 'ok',
+        consumed: false,
+        activity: pendingBrowserActivity
+      };
+    }
+    await setStoredStateChecked({ pendingBrowserActivity: null });
+    return { status: 'ok', consumed: true, activity: null };
+  });
+}
+
 // 分类文件夹或关键词规则变更后，使用已保存的标题、网址和描述
 // 重新运行本地分类器；开启浏览器同步时，同时移动 SmartFav 受管书签。
 async function reclassifyFavorites() {
+  return withBookmarkLayoutLock(reclassifyFavoritesUnlocked);
+}
+
+async function reclassifyFavoritesUnlocked() {
   const { settings, favorites } = await getStoredState();
   let updated = 0;
   const reclassifiedAt = Date.now();
@@ -960,24 +1056,24 @@ async function handleBookmarkCreated(id, node) {
   }
 
   if (shouldOrganize) {
-    await withBookmarkLayoutLock(async () => {
-      // 新增星标同样属于一次浏览器布局变更，必须先把当前外部书签
-      // （包括刚创建的这条）补进活动还原点。
-      await ensureBookmarkRestorePointUnlocked('auto-capture');
-      if (settings.bookmarkWriteMode === 'add') {
-        await SmartFavBookmarks.placeBookmarkInCategory(
-          getTrackedBookmarksApi(),
-          id,
-          suggestion.category
-        );
-      } else {
-        await SmartFavBookmarks.writeFavorite(
-          favorite,
-          { ...settings, browserBookmarksEnabled: true },
-          getTrackedBookmarksApi()
-        );
-      }
-    });
+    // handleBookmarkCreated 的整个读改写过程已经由监听器放入布局锁，
+    // 这里不能再次获取同一把锁，否则 Promise 链会互相等待。
+    // 新增星标属于一次浏览器布局变更，必须先把当前外部书签
+    // （包括刚创建的这条）补进活动还原点。
+    await ensureBookmarkRestorePointUnlocked('auto-capture');
+    if (settings.bookmarkWriteMode === 'add') {
+      await SmartFavBookmarks.placeBookmarkInCategory(
+        getTrackedBookmarksApi(),
+        id,
+        suggestion.category
+      );
+    } else {
+      await SmartFavBookmarks.writeFavorite(
+        favorite,
+        { ...settings, browserBookmarksEnabled: true },
+        getTrackedBookmarksApi()
+      );
+    }
   }
 
   const activity = createBrowserActivity('classified', {
@@ -990,7 +1086,10 @@ async function handleBookmarkCreated(id, node) {
 }
 
 chrome.bookmarks.onCreated.addListener((id, node) => {
-  enqueueBookmarkEvent('auto capture', () => handleBookmarkCreated(id, node));
+  enqueueBookmarkEvent(
+    'auto capture',
+    () => withBookmarkLayoutLock(() => handleBookmarkCreated(id, node))
+  );
 });
 
 async function handleBookmarkMoved(id, moveInfo) {
@@ -1109,7 +1208,10 @@ async function handleBookmarkRemoved(id, removeInfo) {
 
 if (chrome.bookmarks.onRemoved && typeof chrome.bookmarks.onRemoved.addListener === 'function') {
   chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
-    enqueueBookmarkEvent('browser deletion sync', () => handleBookmarkRemoved(id, removeInfo));
+    enqueueBookmarkEvent(
+      'browser deletion sync',
+      () => withBookmarkLayoutLock(() => handleBookmarkRemoved(id, removeInfo))
+    );
   });
 }
 
@@ -1214,7 +1316,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ status: 'error', message: error.message }));
     return true;
   }
-  
+
+  if (message.type === 'updateSettings') {
+    updateSettings(message.patch)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'updateFavoriteOrder') {
+    updateFavoriteOrder(message.category, message.orderedUrls)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
+  if (message.type === 'consumePendingBrowserActivity') {
+    consumePendingBrowserActivity(message.activityId)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ status: 'error', message: error.message }));
+    return true;
+  }
+
   if (message.type === 'saveFavorite') {
     saveFavoriteEntry(message.favorite, message.settingsPatch)
       .then(sendResponse)
