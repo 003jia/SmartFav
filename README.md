@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="dist/SmartFav-Edge-1.14.3.zip"><strong>下载 1.14.3</strong></a>
+  <a href="dist/SmartFav-Edge-1.14.4.zip"><strong>下载 1.14.4</strong></a>
   ·
   <a href="#安装">安装说明</a>
   ·
@@ -61,14 +61,14 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
 
-- [`SmartFav-Edge-1.14.3.zip`](dist/SmartFav-Edge-1.14.3.zip)：Manifest V3 扩展包。
+- [`SmartFav-Edge-1.14.4.zip`](dist/SmartFav-Edge-1.14.4.zip)：Manifest V3 扩展包。
 - 公开仓库只保留当前版本安装包，不长期存放历史二进制文件。
 
 > 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
 
 ## 安装
 
-1. 下载 `SmartFav-Edge-1.14.3.zip` 并解压。
+1. 下载 `SmartFav-Edge-1.14.4.zip` 并解压。
 2. 打开 `edge://extensions/` 或 `chrome://extensions/`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
@@ -76,7 +76,13 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 安装完成后，点击工具栏中的 SmartFav 图标即可打开插件。普通 `http://` 或 `https://` 网页可以收藏；`edge://`、`chrome://`、扩展商店和其他浏览器保护页面仍可查看已有收藏与设置，但浏览器不允许扩展读取或收藏这些页面。
 
-## 1.14.3 更新
+## 1.14.4 更新
+
+- 后台脚本完成分层重构：本地状态、书签操作防护和收藏业务分别迁入 `state-store.js`、`bookmark-guard.js`、`favorites-service.js`。
+- `background.js` 从 1396 行缩减为 248 行，只保留生命周期、浏览器事件监听与 21 条消息路由；收藏、回收站、同步和备份仍共享同一事务锁。
+- 测试现在真实执行后台声明的 `importScripts` 加载链，可发现文件遗漏、加载顺序和全局导出错误。
+- 新增 guard 独立实例、队列串行、任务失败恢复、service worker 重启后内部标记恢复等直接单元测试。
+- 重构不改变默认分类词表、存储格式、消息协议或 AI 可选原则，现有 1.14.3 数据可直接升级。
 
 - 收藏保存、浏览器星标自动采集、浏览器删除回流、回收站、重新分类、设置和排序写入统一进入后台状态事务队列，避免并发读改写互相覆盖。
 - 设置页不再直接覆盖整份本地状态；不同设置补丁和不同分类排序可安全合并。
@@ -114,19 +120,10 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 扩展源码位于 `smartFav智能收藏夹`，`manifest.json` 位于该目录根部。
 
 ```bash
-node --check smartFav智能收藏夹/constants.js
-node --check smartFav智能收藏夹/i18n.js
-node --check smartFav智能收藏夹/classifier.js
-node --check smartFav智能收藏夹/browser-bookmarks.js
-node --check smartFav智能收藏夹/bookmark-backup.js
-node --check smartFav智能收藏夹/order-utils.js
-node --check smartFav智能收藏夹/ai-client.js
-node --check smartFav智能收藏夹/ai-keyword-suggestions.js
-node --check smartFav智能收藏夹/background.js
-node --check smartFav智能收藏夹/popup.js
+find smartFav智能收藏夹 -name '*.js' -print0 | xargs -0 -n1 node --check
 node tests/verify-extension.js
-unzip -t dist/SmartFav-Edge-1.14.3.zip
-node tests/verify-release-package.js dist/SmartFav-Edge-1.14.3.zip
+unzip -t dist/SmartFav-Edge-1.14.4.zip
+node tests/verify-release-package.js dist/SmartFav-Edge-1.14.4.zip
 ```
 
-1.14.3 已通过以上语法检查、扩展自动化验证、跨入口并发压力验证、发布包源码一致性检查和 ZIP 完整性检查。
+当前扩展共 14 个 JavaScript 文件，其中后台新增 `state-store.js`、`bookmark-guard.js`、`favorites-service.js` 三层。1.14.4 已通过以上语法检查、真实 `importScripts` 加载验证、扩展自动化验证、跨入口并发压力验证、发布包源码一致性检查和 ZIP 完整性检查。

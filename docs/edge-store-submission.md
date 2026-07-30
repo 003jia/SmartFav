@@ -1,6 +1,6 @@
 # SmartFav Microsoft Edge Add-ons 提交清单
 
-本清单对应 SmartFav 1.14.3。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
+本清单对应 SmartFav 1.14.4。商店填写内容必须与扩展实际行为和 [隐私政策](../PRIVACY.md) 保持一致。
 
 建议英文商店名称使用 **SmartFav - Bookmark Organizer**，中文名称继续使用 **SmartFav - 智能收藏夹**。这样既保留现有品牌，也能让英语用户直接理解用途，避免与大量泛化的 “AI Bookmark Organizer” 名称混在一起。
 
@@ -116,7 +116,7 @@ SmartFav 的 JavaScript 全部包含在扩展包内。AI 服务返回的是分�
 
 ## 5. 最终检查
 
-- 扩展包：`dist/SmartFav-Edge-1.14.3.zip`
+- 扩展包：`dist/SmartFav-Edge-1.14.4.zip`
 - 中文与 English 商店列表均填写完整。
 - 使用虚拟测试数据本地生成并上传功能截图，中文和 English 图片均完成隐私检查。
 - 小型与大型促销瓷砖已按上传页标注的精确尺寸准备，且不包含个人或内部信息。

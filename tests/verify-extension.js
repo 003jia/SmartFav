@@ -13,9 +13,15 @@ const enMessages = JSON.parse(
   fs.readFileSync(path.join(extensionRoot, '_locales/en/messages.json'), 'utf8')
 );
 const popupHtml = fs.readFileSync(path.join(extensionRoot, 'popup.html'), 'utf8');
+const optionsHtml = fs.readFileSync(path.join(extensionRoot, 'options.html'), 'utf8');
 const popupJs = fs.readFileSync(path.join(extensionRoot, 'popup.js'), 'utf8');
 const popupCss = fs.readFileSync(path.join(extensionRoot, 'styles/popup.css'), 'utf8');
 const backgroundJs = fs.readFileSync(path.join(extensionRoot, 'background.js'), 'utf8');
+const aiClientJs = fs.readFileSync(path.join(extensionRoot, 'ai-client.js'), 'utf8');
+const favoritesServiceJs = fs.readFileSync(
+  path.join(extensionRoot, 'favorites-service.js'),
+  'utf8'
+);
 
 const classifier = require(path.join(extensionRoot, 'classifier.js'));
 const i18n = require(path.join(extensionRoot, 'i18n.js'));
@@ -25,10 +31,69 @@ const aiClient = require(path.join(extensionRoot, 'ai-client.js'));
 const aiKeywordSuggestions = require(path.join(extensionRoot, 'ai-keyword-suggestions.js'));
 const orderUtils = require(path.join(extensionRoot, 'order-utils.js'));
 const constants = require(path.join(extensionRoot, 'constants.js'));
+const stateStore = require(path.join(extensionRoot, 'state-store.js'));
+const bookmarkGuardModule = require(path.join(extensionRoot, 'bookmark-guard.js'));
+const favoritesServiceModule = require(path.join(extensionRoot, 'favorites-service.js'));
+
+const BACKGROUND_MESSAGE_TYPES = [
+  'recoverManagedFavorites',
+  'getFavorites',
+  'deleteFavorite',
+  'getRecentlyDeleted',
+  'restoreDeletedFavorite',
+  'permanentlyDeleteFavorite',
+  'cleanupRecentlyDeleted',
+  'reclassifyFavorites',
+  'syncManagedOrder',
+  'moveFavoriteToCategory',
+  'updateSettings',
+  'updateFavoriteOrder',
+  'consumePendingBrowserActivity',
+  'saveFavorite',
+  'getBookmarkRestorePoints',
+  'createBookmarkRestorePoint',
+  'previewBookmarkRestore',
+  'restoreBookmarkLayout',
+  'exportBookmarkRestorePoints',
+  'importBookmarkRestorePoints',
+  'organizeBookmarks'
+];
+
+const FAVORITES_SERVICE_METHODS = [
+  'cleanupRecentlyDeleted',
+  'getRecentlyDeleted',
+  'permanentlyDeleteFavorite',
+  'restoreDeletedFavorite',
+  'recoverManagedFavorites',
+  'deleteFavorite',
+  'saveFavoriteEntry',
+  'updateSettings',
+  'updateFavoriteOrder',
+  'consumePendingBrowserActivity',
+  'reclassifyFavorites',
+  'getBookmarkRestorePointState',
+  'createBookmarkRestorePoint',
+  'previewBookmarkRestore',
+  'restoreBookmarkLayout',
+  'exportBookmarkRestorePoints',
+  'importBookmarkRestorePoints',
+  'syncManagedOrder',
+  'moveFavoriteToCategory',
+  'organizeBrowserBookmarks',
+  'handleBookmarkCreated',
+  'handleBookmarkMoved',
+  'handleBookmarkRemoved'
+];
+const exercisedBackgroundMessageTypes = new Set();
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.14.3');
+  assert.equal(manifest.version, '1.14.4');
+  assert.ok(
+    Array.from(popupHtml.matchAll(/\?v=([^"]+)/g), (match) => match[1])
+      .every((version) => version === manifest.version)
+  );
+  assert.match(optionsHtml, new RegExp(`options\\.js\\?v=${manifest.version}`));
   assert.equal(manifest.default_locale, 'zh_CN');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
@@ -117,6 +182,8 @@ function verifyManifestAndLocales() {
   assert.doesNotMatch(popupJs, /compactSaveBtn/);
   assert.match(popupJs, /async function persistSettingsPatch\(/);
   assert.match(popupJs, /settingsAutoSaved/);
+  assert.match(popupJs, /const MAX_BACKGROUND_IMAGE_BYTES = 800 \* 1024/);
+  assert.match(popupJs, /file\.size > MAX_BACKGROUND_IMAGE_BYTES/);
   assert.match(popupJs, /bookmarkRestoreLegacyOnlyBadge/);
   assert.match(popupJs, /hasRestorableBookmarkPoint/);
   assert.match(
@@ -128,34 +195,59 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /chrome\.bookmarks\.onCreated\.addListener/);
   assert.match(backgroundJs, /chrome\.bookmarks\.onRemoved\.addListener/);
   assert.match(backgroundJs, /chrome\.bookmarks\.onMoved\.addListener/);
-  assert.match(backgroundJs, /chrome\.notifications\.create/);
-  assert.match(backgroundJs, /pendingBrowserActivity/);
+  assert.match(favoritesServiceJs, /chrome\.notifications\.create/);
+  assert.match(favoritesServiceJs, /pendingBrowserActivity/);
   assert.match(backgroundJs, /organizeBookmarks/);
   assert.match(backgroundJs, /importScripts\([^)]*bookmark-backup\.js/);
   assert.match(backgroundJs, /importScripts\([^)]*order-utils\.js/);
-  assert.match(backgroundJs, /ensureBookmarkRestorePointUnlocked/);
-  assert.match(backgroundJs, /message\.type === 'getBookmarkRestorePoints'/);
-  assert.match(backgroundJs, /message\.type === 'createBookmarkRestorePoint'/);
-  assert.match(backgroundJs, /message\.type === 'previewBookmarkRestore'/);
-  assert.match(backgroundJs, /message\.type === 'restoreBookmarkLayout'/);
-  assert.match(backgroundJs, /message\.type === 'exportBookmarkRestorePoints'/);
-  assert.match(backgroundJs, /message\.type === 'importBookmarkRestorePoints'/);
+  assert.match(backgroundJs, /importScripts\([^)]*favorites-service\.js/);
+  assert.match(favoritesServiceJs, /ensureBookmarkRestorePointUnlocked/);
+  assert.match(backgroundJs, /const MESSAGE_ROUTES = Object\.freeze\(\{/);
+  assert.match(backgroundJs, /function routeMessage\(route, message, sendResponse\)/);
+  assert.doesNotMatch(backgroundJs, /if \(message\.type ===/);
+  BACKGROUND_MESSAGE_TYPES.forEach((type) => {
+    assert.match(backgroundJs, new RegExp(`\\n  ${type}: \\{`));
+  });
   assert.match(backgroundJs, /recoverManagedFavorites/);
-  assert.match(backgroundJs, /collectManagedBookmarks/);
+  assert.match(favoritesServiceJs, /collectManagedBookmarks/);
   assert.match(popupJs, /type:\s*'recoverManagedFavorites'/);
-  assert.match(backgroundJs, /SmartFavBookmarks\.removeFavorite/);
-  assert.match(backgroundJs, /async function reclassifyFavorites\(\)/);
-  assert.match(backgroundJs, /SmartFavBookmarks\.syncManagedCategories/);
-  assert.match(backgroundJs, /SmartFavBookmarks\.syncManagedOrder/);
-  assert.match(backgroundJs, /message\.type === 'reclassifyFavorites'/);
-  assert.match(backgroundJs, /message\.type === 'syncManagedOrder'/);
-  assert.match(backgroundJs, /message\.type === 'moveFavoriteToCategory'/);
-  assert.match(backgroundJs, /message\.type === 'deleteFavorite'/);
-  assert.match(backgroundJs, /message\.type === 'getRecentlyDeleted'/);
-  assert.match(backgroundJs, /message\.type === 'restoreDeletedFavorite'/);
-  assert.match(backgroundJs, /message\.type === 'permanentlyDeleteFavorite'/);
+  assert.match(favoritesServiceJs, /SmartFavBookmarks\.removeFavorite/);
+  assert.match(favoritesServiceJs, /async function reclassifyFavorites\(\)/);
+  assert.match(favoritesServiceJs, /SmartFavBookmarks\.syncManagedCategories/);
+  assert.match(favoritesServiceJs, /SmartFavBookmarks\.syncManagedOrder/);
+  assert.match(
+    favoritesServiceJs,
+    /本文件是单一事务边界|单一事务边界/
+  );
+  assert.ok(
+    backgroundJs.split('\n').length - 1 <= 250,
+    'background.js should remain a thin lifecycle and transport layer'
+  );
+  assert.deepEqual(
+    Array.from(
+      backgroundJs.matchAll(/^function ([A-Za-z0-9_]+)\(/gm),
+      (match) => match[1]
+    ),
+    [
+      'scheduleTrashCleanup',
+      'createDefaultSettings',
+      'readFavoritesFallback',
+      'routeMessage'
+    ]
+  );
   assert.equal(constants.TRASH_RETENTION_MS, 7 * 24 * 60 * 60 * 1000);
   assert.match(backgroundJs, /importScripts\([^)]*constants\.js/);
+  assert.match(
+    backgroundJs,
+    /importScripts\(\s*'constants\.js',\s*'state-store\.js',\s*'bookmark-guard\.js'/
+  );
+  assert.match(backgroundJs, /\} = SmartFavStateStore;/);
+  assert.match(
+    backgroundJs,
+    /const bookmarkGuard = SmartFavBookmarkGuard\.createBookmarkGuard\(\{ chrome \}\)/
+  );
+  assert.doesNotMatch(backgroundJs, /function withBookmarkLayoutLock\(/);
+  assert.doesNotMatch(backgroundJs, /let bookmarkLayoutQueue =/);
   assert.match(popupHtml, /<script src="constants\.js/);
   assert.match(
     manifest.content_security_policy.extension_pages,
@@ -215,7 +307,7 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /schedulePopupClose\(learningResult \? 6500 : 1300\)/);
   assert.match(popupJs, /async function updateStoredSettings\(settingsPatch\)/);
   assert.match(popupJs, /sendRuntimeMessage\('updateSettings', \{ patch: settingsPatch \}\)/);
-  assert.match(backgroundJs, /message\.type === 'updateSettings'/);
+  assert.match(backgroundJs, /\n  updateSettings: \{/);
   assert.match(
     popupJs,
     /class="favorite-row favorite-row-card\$\{inFolder \? ' favorite-row-in-folder' : ''\}"/
@@ -226,7 +318,7 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /SmartFavOrder\.reorderFavoriteUrls/);
   assert.match(popupJs, /SmartFavOrder\.moveFavoriteUrl/);
   assert.match(popupJs, /async function updateStoredFavoriteOrder\(category, orderedUrls\)/);
-  assert.match(backgroundJs, /message\.type === 'updateFavoriteOrder'/);
+  assert.match(backgroundJs, /\n  updateFavoriteOrder: \{/);
   assert.match(popupJs, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/);
   assert.match(
     popupHtml,
@@ -259,11 +351,11 @@ function verifyManifestAndLocales() {
     /compactBookmarkAutoCapture\.addEventListener\('change', handleBookmarkAutoCaptureChange\)/
   );
   assert.match(
-    backgroundJs,
+    favoritesServiceJs,
     /if \(shouldOrganize\) \{/
   );
-  assert.match(backgroundJs, /SmartFavBookmarks\.writeFavorite\(/);
-  assert.match(backgroundJs, /if \(!shouldCapture && !shouldOrganize\) return/);
+  assert.match(favoritesServiceJs, /SmartFavBookmarks\.writeFavorite\(/);
+  assert.match(favoritesServiceJs, /if \(!shouldCapture && !shouldOrganize\) return/);
   assert.match(popupJs, /chrome\.tabs\.update\(activeTab\.id, \{ url \}/);
   assert.match(popupJs, /t\('backToCategories'\)/);
   assert.match(
@@ -310,13 +402,13 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /data-custom-background="true"/);
   assert.match(popupCss, /\.home-navigation-item\s*\{[^}]*min-height:\s*54px;/s);
   assert.match(popupCss, /--shadow:\s*none/);
-  // 玻璃质感依赖三件事：面板模糊/提亮、面板上缘高光与贴地投影、以及可被模糊的高频光场素材。
-  assert.match(popupCss, /--panel-backdrop-filter:\s*blur\(\d+px\)\s+saturate\(\d+%\)\s+brightness\([\d.]+\)/);
+  // 纯磨砂亚克力只保留 blur + saturate，不再叠加 brightness、高光或光场素材。
+  assert.match(popupCss, /--panel-backdrop-filter:\s*blur\(\d+px\)\s+saturate\(\d+%\)/);
+  assert.doesNotMatch(popupCss, /--panel-backdrop-filter:[^;]*brightness\(/);
   assert.match(popupCss, /backdrop-filter:\s*var\(--panel-backdrop-filter\)/);
-  assert.match(popupCss, /inset 0 1px 0 var\(--panel-highlight\)/);
-  assert.match(popupCss, /background-image:\s*var\(--panel-sheen\)/);
-  // 光场里必须存在小尺寸光斑（高频素材），否则模糊不会产生折射观感
-  assert.match(popupCss, /radial-gradient\(\d{2}px \d{2}px at/);
+  assert.match(popupCss, /--panel-highlight:\s*transparent/);
+  assert.match(popupCss, /--panel-sheen:\s*none/);
+  assert.match(popupCss, /--shell-sheen:\s*none/);
   assert.match(
     popupCss,
     /\.button-primary:hover:not\(:disabled\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 999px rgba\(0,\s*0,\s*0,\s*0\.12\);/s
@@ -770,6 +862,39 @@ async function verifyAIProtocols() {
   } finally {
     global.fetch = originalFetch;
   }
+
+  let observedTimeoutMs = null;
+  const timeoutContext = vm.createContext({
+    AbortController,
+    URL,
+    setTimeout(callback, timeoutMs) {
+      observedTimeoutMs = timeoutMs;
+      queueMicrotask(callback);
+      return 1;
+    },
+    clearTimeout() {},
+    fetch(_endpoint, options) {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+    }
+  });
+  vm.runInContext(aiClientJs, timeoutContext, { filename: 'ai-client.js' });
+  await assert.rejects(
+    timeoutContext.SmartFavAI.call('Return JSON', {
+      language: 'en',
+      apiProvider: 'openai_compatible',
+      apiEndpoint: 'https://gateway.example.com/v1/chat/completions',
+      apiKey: 'timeout-test-key',
+      model: 'timeout-test-model'
+    }),
+    /AI request timed out after 30s/
+  );
+  assert.equal(observedTimeoutMs, 30000);
 }
 
 function verifyAIKeywordSuggestions() {
@@ -1709,22 +1834,61 @@ function createBackgroundHarness(
       }
     }
   };
-  const context = vm.createContext({
+  let context;
+  const contextGlobals = {
     chrome: chromeMock,
-    SmartFavClassifier: classifier,
-    SmartFavBookmarks: browserBookmarks,
-    SmartFavBackup: bookmarkBackup,
-    SmartFavOrder: orderUtils,
-    SmartFavI18n: i18n,
-    SmartFavConstants: constants,
-    importScripts() {},
+    importScripts(...scriptNames) {
+      scriptNames.forEach((scriptName) => {
+        const scriptPath = path.join(extensionRoot, scriptName);
+        const scriptSource = fs.readFileSync(scriptPath, 'utf8');
+        vm.runInContext(scriptSource, context, { filename: scriptName });
+      });
+
+      const guardModule = context.SmartFavBookmarkGuard;
+      context.SmartFavBookmarkGuard = {
+        createBookmarkGuard({ chrome: guardChrome }) {
+          const guard = guardModule.createBookmarkGuard({
+            chrome: guardChrome,
+            internalRemoveTtlMs: context.SmartFavConstants.INTERNAL_REMOVE_TTL_MS,
+            logger: {
+              error(...args) {
+                errors.push(args);
+              }
+            }
+          });
+          if (!options.disableLayoutLock) return guard;
+          return Object.freeze({
+            ...guard,
+            withBookmarkLayoutLock(task) {
+              return Promise.resolve().then(task);
+            }
+          });
+        }
+      };
+
+      const serviceModule = context.SmartFavFavoritesService;
+      context.SmartFavFavoritesService = {
+        createFavoritesService(optionsForService) {
+          return serviceModule.createFavoritesService({
+            ...optionsForService,
+            logger: {
+              log() {},
+              error(...args) {
+                errors.push(args);
+              }
+            }
+          });
+        }
+      };
+    },
     console: {
       log() {},
       error(...args) {
         errors.push(args);
       }
     }
-  });
+  };
+  context = vm.createContext(contextGlobals);
   vm.runInContext(backgroundJs, context, { filename: 'background.js' });
   return {
     bookmarks,
@@ -1736,6 +1900,241 @@ function createBackgroundHarness(
     errors,
     context
   };
+}
+
+function createStateStoreChrome(initial = {}, options = {}) {
+  const data = { ...initial };
+  const chromeApi = {
+    runtime: {
+      lastError: null
+    },
+    storage: {
+      local: {
+        get(keys, callback) {
+          if (options.readError) {
+            chromeApi.runtime.lastError = { message: options.readError };
+            callback(undefined);
+            chromeApi.runtime.lastError = null;
+            return;
+          }
+          callback(Object.fromEntries(
+            keys.map((key) => [key, data[key]])
+          ));
+        },
+        set(values, callback) {
+          if (options.writeError) {
+            chromeApi.runtime.lastError = { message: options.writeError };
+            callback();
+            chromeApi.runtime.lastError = null;
+            return;
+          }
+          Object.assign(data, values);
+          callback();
+        }
+      }
+    }
+  };
+  return { chromeApi, data };
+}
+
+async function verifyStateStore() {
+  assert.deepEqual(Array.from(stateStore.STATE_KEYS), [
+    'settings',
+    'favorites',
+    'favoriteOrder',
+    'recentlyDeleted',
+    'bookmarkRestorePoints',
+    'pendingBrowserActivity'
+  ]);
+
+  const validFavorite = { url: 'https://state-store.example.com/' };
+  const success = createStateStoreChrome({
+    settings: { language: 'en' },
+    favorites: [validFavorite],
+    favoriteOrder: { Tools: [validFavorite.url] },
+    recentlyDeleted: null,
+    bookmarkRestorePoints: 'invalid',
+    pendingBrowserActivity: { id: 'activity-1' }
+  });
+  const stored = await stateStore.getStoredState(success.chromeApi);
+  assert.equal(stored.settings.language, 'en');
+  assert.deepEqual(stored.favorites, [validFavorite]);
+  assert.deepEqual(stored.favoriteOrder, { Tools: [validFavorite.url] });
+  assert.deepEqual(stored.recentlyDeleted, []);
+  assert.deepEqual(stored.bookmarkRestorePoints, []);
+  assert.equal(stored.pendingBrowserActivity.id, 'activity-1');
+
+  await stateStore.setStoredFavorites([validFavorite], success.chromeApi);
+  await stateStore.setStoredState(
+    { recentlyDeleted: [{ trashId: 'trash-1' }] },
+    success.chromeApi
+  );
+  assert.deepEqual(success.data.favorites, [validFavorite]);
+  assert.equal(success.data.recentlyDeleted[0].trashId, 'trash-1');
+
+  const readFailure = createStateStoreChrome({}, { readError: 'read failed' });
+  await assert.rejects(
+    stateStore.getStoredState(readFailure.chromeApi),
+    /read failed/
+  );
+  const writeFailure = createStateStoreChrome({}, { writeError: 'write failed' });
+  await assert.rejects(
+    stateStore.setStoredStateChecked({ favorites: [] }, writeFailure.chromeApi),
+    /write failed/
+  );
+  await assert.rejects(
+    stateStore.getStoredState({ runtime: {} }),
+    /chrome\.storage\.local is unavailable/
+  );
+}
+
+function createBookmarkGuardChrome() {
+  const sessionState = {};
+  const calls = [];
+  const chromeApi = {
+    runtime: {
+      lastError: null
+    },
+    storage: {
+      session: {
+        get(keys, callback) {
+          callback(Object.fromEntries(
+            keys.map((key) => [key, sessionState[key]])
+          ));
+        },
+        set(values, callback) {
+          Object.assign(sessionState, values);
+          if (callback) callback();
+        }
+      }
+    },
+    bookmarks: {
+      remove(id, callback) {
+        calls.push({ type: 'remove', id: String(id) });
+        callback();
+      },
+      move(id, destination, callback) {
+        calls.push({ type: 'move', id: String(id), destination });
+        callback({ id: String(id), ...destination });
+      },
+      search(query, callback) {
+        calls.push({ type: 'search', query });
+        callback([]);
+      }
+    }
+  };
+  return { chromeApi, sessionState, calls };
+}
+
+async function verifyBookmarkGuard() {
+  const mock = createBookmarkGuardChrome();
+  const errors = [];
+  const guard = bookmarkGuardModule.createBookmarkGuard({
+    chrome: mock.chromeApi,
+    internalRemoveTtlMs: 30 * 1000,
+    logger: {
+      error(...args) {
+        errors.push(args);
+      }
+    }
+  });
+
+  const sequence = [];
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const first = guard.withBookmarkLayoutLock(async () => {
+    sequence.push('first-start');
+    await firstGate;
+    sequence.push('first-end');
+  });
+  const second = guard.withBookmarkLayoutLock(async () => {
+    sequence.push('second-start');
+    sequence.push('second-end');
+  });
+  await Promise.resolve();
+  assert.deepEqual(sequence, ['first-start']);
+
+  // 第二个 guard 是另一 worker 实例的模型，锁状态不能互相污染。
+  const independentGuard = bookmarkGuardModule.createBookmarkGuard({
+    chrome: mock.chromeApi,
+    internalRemoveTtlMs: 30 * 1000
+  });
+  const independentResult = await independentGuard.withBookmarkLayoutLock(
+    async () => 'independent'
+  );
+  assert.equal(independentResult, 'independent');
+  assert.deepEqual(sequence, ['first-start']);
+
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(sequence, [
+    'first-start',
+    'first-end',
+    'second-start',
+    'second-end'
+  ]);
+
+  await assert.rejects(
+    guard.withBookmarkLayoutLock(async () => {
+      throw new Error('layout failure');
+    }),
+    /layout failure/
+  );
+  assert.equal(
+    await guard.withBookmarkLayoutLock(async () => 'queue recovered'),
+    'queue recovered'
+  );
+
+  const eventSequence = [];
+  guard.enqueueBookmarkEvent('first event', async () => {
+    eventSequence.push('first');
+  });
+  guard.enqueueBookmarkEvent('failed event', async () => {
+    throw new Error('event failure');
+  });
+  await guard.enqueueBookmarkEvent('last event', async () => {
+    eventSequence.push('last');
+  });
+  assert.deepEqual(eventSequence, ['first', 'last']);
+  assert.equal(errors.length, 1);
+  assert.match(String(errors[0][0]), /failed event/);
+
+  const tracked = guard.getTrackedBookmarksApi();
+  await new Promise((resolve) => tracked.remove('remove-1', resolve));
+  const restartedAfterRemove = bookmarkGuardModule.createBookmarkGuard({
+    chrome: mock.chromeApi,
+    internalRemoveTtlMs: 30 * 1000
+  });
+  assert.equal(
+    await restartedAfterRemove.consumeInternalBookmarkRemoval('remove-1'),
+    true
+  );
+  assert.equal(
+    await restartedAfterRemove.consumeInternalBookmarkRemoval('remove-1'),
+    false
+  );
+
+  await new Promise((resolve) => {
+    tracked.move('move-1', { parentId: 'folder-2' }, resolve);
+  });
+  const restartedAfterMove = bookmarkGuardModule.createBookmarkGuard({
+    chrome: mock.chromeApi,
+    internalRemoveTtlMs: 30 * 1000
+  });
+  assert.equal(
+    await restartedAfterMove.consumeInternalBookmarkMove('move-1'),
+    true
+  );
+  assert.equal(
+    await restartedAfterMove.consumeInternalBookmarkMove('move-1'),
+    false
+  );
+  assert.deepEqual(
+    mock.calls.map((call) => call.type),
+    ['remove', 'move']
+  );
 }
 
 async function createBookmark(api, data) {
@@ -1791,10 +2190,134 @@ async function fireBookmarkMoved(harness, id, parentId, index) {
 }
 
 async function sendBackgroundMessage(harness, message) {
+  exercisedBackgroundMessageTypes.add(message.type);
   return new Promise((resolve) => {
     const keepsChannelOpen = harness.listeners.onMessage(message, {}, resolve);
     assert.equal(keepsChannelOpen, true);
   });
+}
+
+async function verifyFavoritesServiceDependencyInjection() {
+  const injectedChrome = {
+    runtime: { lastError: null },
+    bookmarks: {}
+  };
+  let chromeUsedForRead = null;
+  const injectedStateStore = {
+    getStoredState(chromeApi) {
+      chromeUsedForRead = chromeApi;
+      return Promise.resolve({
+        settings: {},
+        favorites: [],
+        favoriteOrder: {},
+        recentlyDeleted: [],
+        bookmarkRestorePoints: [],
+        pendingBrowserActivity: null
+      });
+    },
+    setStoredStateChecked() {
+      return Promise.resolve();
+    },
+    setStoredFavorites() {
+      return Promise.resolve();
+    },
+    setStoredState() {
+      return Promise.resolve();
+    }
+  };
+  const service = favoritesServiceModule.createFavoritesService({
+    chrome: injectedChrome,
+    stateStore: injectedStateStore,
+    bookmarkGuard: {
+      getTrackedBookmarksApi() {
+        return injectedChrome.bookmarks;
+      },
+      withBookmarkLayoutLock(task) {
+        return Promise.resolve().then(task);
+      },
+      consumeInternalBookmarkRemoval() {
+        return Promise.resolve(false);
+      },
+      consumeInternalBookmarkMove() {
+        return Promise.resolve(false);
+      }
+    },
+    classifier,
+    bookmarks: browserBookmarks,
+    backup: bookmarkBackup,
+    order: orderUtils,
+    i18n,
+    constants,
+    logger: { log() {}, error() {} }
+  });
+  const result = await service.getRecentlyDeleted();
+  assert.equal(result.status, 'ok');
+  assert.equal(chromeUsedForRead, injectedChrome);
+}
+
+async function verifyBackgroundMessageRoutes() {
+  const enDefaults = classifier.getDefaults('en');
+  const harness = createBackgroundHarness({
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules
+  });
+  const routeTypes = Array.from(
+    vm.runInContext('Object.keys(MESSAGE_ROUTES)', harness.context)
+  );
+  assert.deepEqual(
+    routeTypes.slice().sort(),
+    BACKGROUND_MESSAGE_TYPES.slice().sort()
+  );
+  const serviceMethods = Array.from(
+    vm.runInContext('Object.keys(favoritesService)', harness.context)
+  );
+  assert.deepEqual(
+    serviceMethods.slice().sort(),
+    FAVORITES_SERVICE_METHODS.slice().sort()
+  );
+
+  let unknownResponseCalled = false;
+  const unknownResult = harness.listeners.onMessage(
+    { type: 'unknownMessage' },
+    {},
+    () => {
+      unknownResponseCalled = true;
+    }
+  );
+  assert.equal(unknownResult, false);
+  assert.equal(unknownResponseCalled, false);
+
+  // getFavorites 保留历史裸数组协议；即使恢复与降级读取都失败，
+  // 也必须返回 []，不能混入带 status 的错误对象。
+  const readFailureHarness = createBackgroundHarness(
+    {
+      language: 'en',
+      categories: enDefaults.categories,
+      keywordRules: enDefaults.keywordRules
+    },
+    [],
+    [],
+    [],
+    {},
+    { storageReadError: 'storage unavailable' }
+  );
+  const favorites = await sendBackgroundMessage(
+    readFailureHarness,
+    { type: 'getFavorites' }
+  );
+  assert.deepEqual(Array.from(favorites), []);
+
+  const recentlyDeleted = await sendBackgroundMessage(
+    harness,
+    { type: 'getRecentlyDeleted' }
+  );
+  assert.equal(recentlyDeleted.status, 'ok');
+  const restorePoint = await sendBackgroundMessage(
+    harness,
+    { type: 'createBookmarkRestorePoint' }
+  );
+  assert.equal(restorePoint.status, 'ok');
 }
 
 async function verifySaveFavoriteConsistency() {
@@ -1984,6 +2507,41 @@ async function verifyCrossEntryConsistency() {
   assert.equal(deleteHarness.state.recentlyDeleted.length, 1);
   assert.equal(deleteHarness.state.recentlyDeleted[0].url, deleteUrl);
 
+  // 变异哨兵：在同一份生产源码中临时移除布局锁，完全相同的并发场景
+  // 必须破坏最终不变量，证明上述用例确实能够捕获“旧快照覆盖新状态”。
+  const unlockedKeepUrl = 'https://cross-entry.example.com/unlocked-keep';
+  const unlockedHarness = createBackgroundHarness(
+    baseSettings,
+    [{ title: 'Delete me', url: deleteUrl, category: 'Tools', createdAt: 1 }],
+    [],
+    [],
+    {},
+    { storageDelay: true, disableLayoutLock: true }
+  );
+  await Promise.all([
+    sendBackgroundMessage(unlockedHarness, {
+      type: 'saveFavorite',
+      favorite: {
+        title: 'Unlocked keep',
+        url: unlockedKeepUrl,
+        category: 'Learning',
+        createdAt: 2
+      }
+    }),
+    sendBackgroundMessage(unlockedHarness, {
+      type: 'deleteFavorite',
+      url: deleteUrl
+    })
+  ]);
+  const unlockedFavoriteUrls = unlockedHarness.state.favorites.map((item) => item.url);
+  const unlockedInvariantHolds = (
+    unlockedFavoriteUrls.length === 1
+    && unlockedFavoriteUrls[0] === unlockedKeepUrl
+    && unlockedHarness.state.recentlyDeleted.length === 1
+    && unlockedHarness.state.recentlyDeleted[0].url === deleteUrl
+  );
+  assert.equal(unlockedInvariantHolds, false);
+
   // 浏览器侧删除回流与 popup 保存同时发生，也必须保留新收藏并把旧收藏入回收站。
   const browserDeleteUrl = 'https://cross-entry.example.com/browser-delete';
   const browserDeleteHarness = createBackgroundHarness(
@@ -2024,6 +2582,124 @@ async function verifyCrossEntryConsistency() {
   );
   assert.equal(browserDeleteHarness.state.recentlyDeleted.length, 1);
   assert.equal(browserDeleteHarness.state.recentlyDeleted[0].url, browserDeleteUrl);
+
+  // 重新分类全部收藏与浏览器侧跨分类移动并发时，两个入口必须基于最新状态串行提交。
+  // A 由规则重新分类到 Programming，B 由浏览器移动到 Tools；任一路径使用旧快照
+  // 覆盖另一条路径，都会让其中一个结果退回 Other。
+  const reclassifyUrl = 'https://cross-entry.example.com/javascript-guide';
+  const movedUrl = 'https://cross-entry.example.com/useful-extension';
+  const reclassifyMoveHarness = createBackgroundHarness(
+    { ...baseSettings, bookmarkAutoCaptureEnabled: true },
+    [
+      {
+        title: 'JavaScript coding guide',
+        url: reclassifyUrl,
+        category: 'Other',
+        createdAt: 1
+      },
+      {
+        title: 'Useful extension tool',
+        url: movedUrl,
+        category: 'Other',
+        createdAt: 2
+      }
+    ],
+    [],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const managedMoveResult = await browserBookmarks.writeFavorite(
+    {
+      title: 'Useful extension tool',
+      url: movedUrl,
+      category: 'Other'
+    },
+    { ...baseSettings, browserBookmarksEnabled: true },
+    reclassifyMoveHarness.bookmarks
+  );
+  const managedRoot = [...reclassifyMoveHarness.bookmarks.nodes.values()]
+    .find((node) => !node.url && node.title === browserBookmarks.ROOT_FOLDER_TITLE);
+  assert.ok(managedRoot);
+  const toolsFolder = await createBookmark(reclassifyMoveHarness.bookmarks, {
+    parentId: managedRoot.id,
+    title: 'Tools'
+  });
+  const reclassifyPromise = sendBackgroundMessage(reclassifyMoveHarness, {
+    type: 'reclassifyFavorites'
+  });
+  const movePromise = fireBookmarkMoved(
+    reclassifyMoveHarness,
+    managedMoveResult.id,
+    toolsFolder.id
+  );
+  const [reclassifyResult] = await Promise.all([reclassifyPromise, movePromise]);
+  await flushBackgroundEvents();
+  assert.equal(reclassifyResult.status, 'ok');
+  assert.equal(reclassifyMoveHarness.state.favorites.length, 2);
+  assert.equal(
+    new Set(reclassifyMoveHarness.state.favorites.map((item) => item.url)).size,
+    2
+  );
+  const reclassifiedByUrl = new Map(
+    reclassifyMoveHarness.state.favorites.map((item) => [item.url, item])
+  );
+  assert.equal(reclassifiedByUrl.get(reclassifyUrl).category, 'Programming');
+  assert.equal(reclassifiedByUrl.get(movedUrl).category, 'Tools');
+
+  // 同一条回收站记录的到期清理与手工恢复必须互斥：先进入队列的操作获胜，
+  // 后进入的操作只能返回 0，不能出现“既恢复到收藏又报告已清理”。
+  const expiredTrashItem = {
+    title: 'Expired concurrent item',
+    url: 'https://cross-entry.example.com/expired',
+    category: 'Other',
+    trashId: 'cross-entry-expired',
+    deletedAt: Date.now() - (8 * 24 * 60 * 60 * 1000),
+    expiresAt: Date.now() - 1000
+  };
+  const cleanupFirstHarness = createBackgroundHarness(
+    baseSettings,
+    [],
+    [expiredTrashItem],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const [cleanupFirst, restoreAfterCleanup] = await Promise.all([
+    sendBackgroundMessage(cleanupFirstHarness, {
+      type: 'cleanupRecentlyDeleted'
+    }),
+    sendBackgroundMessage(cleanupFirstHarness, {
+      type: 'restoreDeletedFavorite',
+      trashId: expiredTrashItem.trashId
+    })
+  ]);
+  assert.equal(cleanupFirst.removed, 1);
+  assert.equal(restoreAfterCleanup.restored, 0);
+  assert.equal(cleanupFirstHarness.state.favorites.length, 0);
+  assert.equal(cleanupFirstHarness.state.recentlyDeleted.length, 0);
+
+  const restoreFirstHarness = createBackgroundHarness(
+    baseSettings,
+    [],
+    [expiredTrashItem],
+    [],
+    {},
+    { storageDelay: true }
+  );
+  const [restoreFirst, cleanupAfterRestore] = await Promise.all([
+    sendBackgroundMessage(restoreFirstHarness, {
+      type: 'restoreDeletedFavorite',
+      trashId: expiredTrashItem.trashId
+    }),
+    sendBackgroundMessage(restoreFirstHarness, {
+      type: 'cleanupRecentlyDeleted'
+    })
+  ]);
+  assert.equal(restoreFirst.restored, 1);
+  assert.equal(cleanupAfterRestore.removed, 0);
+  assert.equal(restoreFirstHarness.state.favorites.length, 1);
+  assert.equal(restoreFirstHarness.state.recentlyDeleted.length, 0);
 
   // 两个设置补丁只能合并各自字段，不能用旧的整份 settings 互相覆盖。
   const settingsHarness = createBackgroundHarness(
@@ -2308,7 +2984,7 @@ async function verifyBackgroundBookmarkFlows() {
   assert.equal(smartFavMoveResult.browserStatus, 'ok');
   assert.equal(smartFavMoveHarness.state.favorites[0].category, 'Learning');
   assert.equal(smartFavMoveHarness.state.favoriteOrder.Tools, undefined);
-  assert.deepEqual(smartFavMoveHarness.state.favoriteOrder.Learning, [
+  assert.deepEqual(Array.from(smartFavMoveHarness.state.favoriteOrder.Learning), [
     'https://cross-category.example.com/reference',
     smartFavMoveUrl
   ]);
@@ -2360,7 +3036,7 @@ async function verifyBackgroundBookmarkFlows() {
   );
   assert.equal(browserMoveHarness.state.favorites[0].category, 'Learning');
   assert.equal(browserMoveHarness.state.favoriteOrder.Tools, undefined);
-  assert.deepEqual(browserMoveHarness.state.favoriteOrder.Learning, [browserMoveUrl]);
+  assert.deepEqual(Array.from(browserMoveHarness.state.favoriteOrder.Learning), [browserMoveUrl]);
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.type, 'moved');
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.previousCategory, 'Tools');
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.category, 'Learning');
@@ -3029,11 +3705,20 @@ async function main() {
   await verifyManagedOrderSync();
   await verifyOrganizeBookmarks();
   await verifyBookmarkRestorePoints();
+  await verifyStateStore();
+  await verifyBookmarkGuard();
+  await verifyFavoritesServiceDependencyInjection();
+  await verifyBackgroundMessageRoutes();
   await verifyBackgroundBookmarkFlows();
   await verifySaveFavoriteConsistency();
   await verifyCrossEntryConsistency();
   await verifyStorageWriteFailures();
   await verifyInternalMarkPersistence();
+  assert.deepEqual(
+    [...exercisedBackgroundMessageTypes].sort(),
+    BACKGROUND_MESSAGE_TYPES.slice().sort(),
+    'every background message route must be executed by the regression suite'
+  );
   console.log('SmartFav extension verification passed.');
 }
 
