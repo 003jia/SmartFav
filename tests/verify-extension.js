@@ -307,8 +307,13 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /data-custom-background="true"/);
   assert.match(popupCss, /\.home-navigation-item\s*\{[^}]*min-height:\s*54px;/s);
   assert.match(popupCss, /--shadow:\s*none/);
-  assert.match(popupCss, /--panel-backdrop-filter:\s*blur\(14px\)\s+saturate\(140%\)/);
+  // 玻璃质感依赖三件事：面板模糊/提亮、面板上缘高光与贴地投影、以及可被模糊的高频光场素材。
+  assert.match(popupCss, /--panel-backdrop-filter:\s*blur\(\d+px\)\s+saturate\(\d+%\)\s+brightness\([\d.]+\)/);
   assert.match(popupCss, /backdrop-filter:\s*var\(--panel-backdrop-filter\)/);
+  assert.match(popupCss, /inset 0 1px 0 var\(--panel-highlight\)/);
+  assert.match(popupCss, /background-image:\s*var\(--panel-sheen\)/);
+  // 光场里必须存在小尺寸光斑（高频素材），否则模糊不会产生折射观感
+  assert.match(popupCss, /radial-gradient\(\d{2}px \d{2}px at/);
   assert.match(
     popupCss,
     /\.button-primary:hover:not\(:disabled\)\s*\{[^}]*box-shadow:\s*inset 0 0 0 999px rgba\(0,\s*0,\s*0,\s*0\.12\);/s
