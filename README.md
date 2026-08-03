@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="dist/SmartFav-Edge-1.14.5.zip"><strong>下载 1.14.5</strong></a>
+  <a href="https://github.com/003jia/SmartFav/releases/download/v1.14.5/SmartFav-Edge-1.14.5.zip"><strong>下载 1.14.5</strong></a>
   ·
   <a href="#安装">安装说明</a>
   ·
@@ -61,7 +61,7 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
 
-- [`SmartFav-Edge-1.14.5.zip`](dist/SmartFav-Edge-1.14.5.zip)：Manifest V3 扩展包。
+- [`SmartFav-Edge-1.14.5.zip`](https://github.com/003jia/SmartFav/releases/download/v1.14.5/SmartFav-Edge-1.14.5.zip)：Manifest V3 扩展包。
 - 公开仓库只保留当前版本安装包，不长期存放历史二进制文件。
 
 > 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
