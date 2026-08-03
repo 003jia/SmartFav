@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.14.4">
+  <link rel="stylesheet" href="styles/popup.css?v=1.14.5">
 </head>
 <body>
   <div class="app-shell">
@@ -265,12 +265,24 @@
             <strong data-i18n="customBackground">自定义背景图</strong>
             <small data-i18n="customBackgroundHint">支持 JPG、PNG、WebP、GIF，图片仅保存在浏览器本地</small>
           </div>
-          <div id="backgroundImagePreview" class="background-image-preview" aria-hidden="true"></div>
+          <div
+            id="backgroundImagePreview"
+            class="background-image-preview"
+            role="img"
+            tabindex="-1"
+            aria-disabled="true"
+            data-i18n-aria-label="backgroundPositionAriaLabel"
+            aria-label="拖动背景图片选择显示位置"
+          >
+            <span class="background-position-hint" data-i18n="backgroundPositionDragHint">拖动图片选择显示位置</span>
+            <output id="backgroundPositionValue" class="background-position-value">50% · 50%</output>
+          </div>
           <div class="background-image-actions">
             <label class="background-upload-button" for="compactBackgroundImage">
               <span data-i18n="chooseImage">选择图片</span>
               <input id="compactBackgroundImage" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
             </label>
+            <button id="resetBackgroundPositionBtn" type="button" data-i18n="resetBackgroundPosition">居中</button>
             <button id="clearBackgroundImageBtn" type="button" data-i18n="clearImage">清除图片</button>
           </div>
         </div>
@@ -423,13 +435,13 @@
     </section>
   </div>
 
-  <script src="constants.js?v=1.14.4"></script>
-  <script src="i18n.js?v=1.14.4"></script>
-  <script src="classifier.js?v=1.14.4"></script>
-  <script src="browser-bookmarks.js?v=1.14.4"></script>
-  <script src="ai-client.js?v=1.14.4"></script>
-  <script src="ai-keyword-suggestions.js?v=1.14.4"></script>
-  <script src="order-utils.js?v=1.14.4"></script>
-  <script src="popup.js?v=1.14.4"></script>
+  <script src="constants.js?v=1.14.5"></script>
+  <script src="i18n.js?v=1.14.5"></script>
+  <script src="classifier.js?v=1.14.5"></script>
+  <script src="browser-bookmarks.js?v=1.14.5"></script>
+  <script src="ai-client.js?v=1.14.5"></script>
+  <script src="ai-keyword-suggestions.js?v=1.14.5"></script>
+  <script src="order-utils.js?v=1.14.5"></script>
+  <script src="popup.js?v=1.14.5"></script>
 </body>
 </html>

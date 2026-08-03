@@ -3,16 +3,17 @@
   --popup-width: 360px;
   --popup-height: 560px;
   --custom-background-image: none;
-  --custom-background-overlay: rgba(248, 250, 253, 0.22);
-  --custom-surface: rgba(255, 255, 255, 0.62);
+  --custom-background-position: 50% 50%;
+  --custom-background-overlay: rgba(248, 250, 253, 0.08);
+  --custom-surface: rgba(248, 250, 253, 0.16);
   /* 纯磨砂亚克力：背景只做一层平坦的柔和渐变，不再自造光场。
      玻璃感完全交给 backdrop-filter 的模糊本身——磨砂就是磨砂，不靠光源折射。 */
   --body-bg: linear-gradient(180deg, #eef2f7, #e3e9f1);
   /* 外壳只做极薄一层雾，与面板叠成统一的磨砂面 */
-  --shell-bg: rgba(248, 250, 253, 0.32);
-  --surface: rgba(255, 255, 255, 0.32);
-  --surface-soft: rgba(247, 249, 252, 0.46);
-  --overlay-surface: rgba(255, 255, 255, 0.92);
+  --shell-bg: rgba(248, 250, 253, 0.18);
+  --surface: rgba(255, 255, 255, 0.18);
+  --surface-soft: rgba(247, 249, 252, 0.24);
+  --overlay-surface: rgba(255, 255, 255, 0.36);
   --text: #18202a;
   /* 次要文字压在半透明磨砂面上，加深以保住 WCAG AA（4.5:1） */
   --muted: #565f6b;
@@ -22,15 +23,15 @@
   --control-line: rgba(110, 130, 158, 0.24);
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
-  --primary-soft: rgba(219, 234, 254, 0.78);
+  --primary-soft: rgba(219, 234, 254, 0.36);
   --primary-contrast: #ffffff;
   --success: #0f766e;
-  --success-soft: rgba(224, 247, 242, 0.78);
+  --success-soft: rgba(224, 247, 242, 0.34);
   --success-line: rgba(15, 118, 110, 0.18);
   --danger: #b42318;
-  --danger-soft: rgba(255, 237, 235, 0.82);
+  --danger-soft: rgba(255, 237, 235, 0.38);
   --danger-line: rgba(180, 35, 24, 0.18);
-  --tag-bg: rgba(239, 246, 255, 0.84);
+  --tag-bg: rgba(239, 246, 255, 0.34);
   --tag-line: rgba(96, 132, 196, 0.2);
   --tag-text: #315aaf;
   --spinner-track: rgba(108, 118, 132, 0.34);
@@ -49,8 +50,8 @@
 :root[data-theme="black"] {
   color-scheme: dark;
   --shell-highlight: rgba(255, 255, 255, 0.12);
-  --custom-background-overlay: rgba(6, 9, 14, 0.46);
-  --custom-surface: rgba(18, 23, 31, 0.7);
+  --custom-background-overlay: rgba(6, 9, 14, 0.26);
+  --custom-surface: rgba(18, 23, 31, 0.28);
 }
 
 :root[data-theme="glass"][data-mode="dark"] {
@@ -330,11 +331,12 @@ select:focus-visible {
 }
 
 :root[data-custom-background="true"] .app-shell {
-  background-color: var(--shell-bg);
+  background-color: transparent;
   background-image:
     linear-gradient(var(--custom-background-overlay), var(--custom-background-overlay)),
     var(--custom-background-image);
-  background-position: center;
+  background-position: center, var(--custom-background-position);
+  background-repeat: no-repeat;
   background-size: cover;
 }
 
@@ -346,8 +348,40 @@ select:focus-visible {
 :root[data-custom-background="true"] .panel-view,
 :root[data-custom-background="true"] .settings-view {
   background: var(--custom-surface);
-  -webkit-backdrop-filter: blur(14px) saturate(128%);
-  backdrop-filter: blur(14px) saturate(128%);
+  -webkit-backdrop-filter: blur(22px) saturate(142%);
+  backdrop-filter: blur(22px) saturate(142%);
+}
+
+:root[data-theme="glass"] .notice,
+:root[data-theme="glass"] .select-wrap select,
+:root[data-theme="glass"] .page-learning-option,
+:root[data-theme="glass"] .tag,
+:root[data-theme="glass"] .button-secondary,
+:root[data-theme="glass"] .home-navigation-item,
+:root[data-theme="glass"] .trash-actions button,
+:root[data-theme="glass"] .learning-button-secondary,
+:root[data-theme="glass"] .trash-entry-button,
+:root[data-theme="glass"] .background-upload-button,
+:root[data-theme="glass"] .background-image-actions button,
+:root[data-theme="glass"] .compact-field input,
+:root[data-theme="glass"] .compact-field select,
+:root[data-theme="glass"] .compact-field textarea,
+:root[data-theme="glass"] .category-add-row input,
+:root[data-theme="glass"] .category-add-row button,
+:root[data-theme="glass"] .category-ai-assistant,
+:root[data-theme="glass"] .category-ai-assistant button,
+:root[data-theme="glass"] .category-rule-item,
+:root[data-theme="glass"] .category-rule-ai-badge,
+:root[data-theme="glass"] .compact-test-button,
+:root[data-theme="glass"] .folder-item,
+:root[data-theme="glass"] .category-count,
+:root[data-theme="glass"] .favorite-row-card,
+:root[data-theme="glass"] .favorite-move-select,
+:root[data-theme="glass"] .bookmark-backup-badge,
+:root[data-theme="glass"] .bookmark-actions button,
+:root[data-theme="glass"] input[type="checkbox"] {
+  -webkit-backdrop-filter: blur(18px) saturate(138%);
+  backdrop-filter: blur(18px) saturate(138%);
 }
 
 .app-shell > * {
@@ -1389,8 +1423,8 @@ select:focus-visible {
 
 .background-image-field {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px;
-  gap: 9px 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   margin: 0 -14px;
   padding: 11px 14px 13px;
   border-top: 1px solid var(--line);
@@ -1414,22 +1448,74 @@ select:focus-visible {
 }
 
 .background-image-preview {
-  width: 58px;
-  height: 42px;
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 112px;
+  place-items: center;
+  overflow: hidden;
   border: 1px dashed var(--control-line);
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--surface-soft);
-  background-position: center;
+  background-position: var(--custom-background-position);
   background-size: cover;
+  cursor: default;
+  outline: none;
+  touch-action: none;
+  user-select: none;
 }
 
 .background-image-preview.has-image {
   border-style: solid;
+  cursor: grab;
+}
+
+.background-image-preview.has-image:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.background-image-preview.is-dragging {
+  cursor: grabbing;
+}
+
+.background-position-hint,
+.background-position-value {
+  position: absolute;
+  z-index: 1;
+  border: 1px solid var(--shell-highlight);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-soft) 74%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.background-position-hint {
+  bottom: 9px;
+  left: 9px;
+  padding: 5px 8px;
+}
+
+.background-position-value {
+  top: 9px;
+  right: 9px;
+  padding: 4px 7px;
+}
+
+.background-image-preview.has-image .background-position-hint,
+.background-image-preview.has-image .background-position-value {
+  opacity: 1;
 }
 
 .background-image-actions {
   display: flex;
-  grid-column: 1 / -1;
+  flex-wrap: wrap;
   gap: 7px;
 }
 

@@ -88,7 +88,7 @@ const exercisedBackgroundMessageTypes = new Set();
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.14.4');
+  assert.equal(manifest.version, '1.14.5');
   assert.ok(
     Array.from(popupHtml.matchAll(/\?v=([^"]+)/g), (match) => match[1])
       .every((version) => version === manifest.version)
@@ -153,6 +153,9 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="compactPopupWidth"/);
   assert.match(popupHtml, /id="compactPopupHeight"/);
   assert.match(popupHtml, /id="compactBackgroundImage"/);
+  assert.match(popupHtml, /id="backgroundImagePreview"[^>]*tabindex="-1"/s);
+  assert.match(popupHtml, /id="backgroundPositionValue"/);
+  assert.match(popupHtml, /id="resetBackgroundPositionBtn"/);
   assert.match(popupHtml, /id="clearBackgroundImageBtn"/);
   assert.match(popupHtml, /id="compactClassificationMode"/);
   assert.match(popupHtml, /id="compactKeywordWeight"/);
@@ -184,6 +187,18 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /settingsAutoSaved/);
   assert.match(popupJs, /const MAX_BACKGROUND_IMAGE_BYTES = 800 \* 1024/);
   assert.match(popupJs, /file\.size > MAX_BACKGROUND_IMAGE_BYTES/);
+  assert.match(popupJs, /customBackgroundPositionX:\s*50/);
+  assert.match(popupJs, /customBackgroundPositionY:\s*50/);
+  assert.match(popupJs, /function normalizeBackgroundPosition\(/);
+  assert.match(popupJs, /function handleBackgroundPositionPointerDown\(/);
+  assert.match(popupJs, /backgroundImagePreview\.tabIndex = hasImage \? 0 : -1/);
+  assert.match(popupJs, /async function persistBackgroundPosition\(/);
+  assert.match(popupJs, /backgroundImagePreview\.addEventListener\('pointermove'/);
+  assert.match(popupJs, /backgroundImagePreview\.addEventListener\('keydown'/);
+  assert.match(i18n.MESSAGES.zh_CN.customBackgroundHint, /拖动/);
+  assert.match(i18n.MESSAGES.en.customBackgroundHint, /Drag/);
+  assert.match(i18n.MESSAGES.zh_CN.backgroundPositionSaved, /自动保存/);
+  assert.match(i18n.MESSAGES.en.backgroundPositionAriaLabel, /arrow keys/);
   assert.match(popupJs, /bookmarkRestoreLegacyOnlyBadge/);
   assert.match(popupJs, /hasRestorableBookmarkPoint/);
   assert.match(
@@ -378,6 +393,10 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /\.panel-view,\s*\.settings-view\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(popupCss, /\.content-back-button\s*\{/);
   assert.match(popupCss, /\.background-image-field\s*\{/);
+  assert.match(popupCss, /--custom-background-position:\s*50% 50%/);
+  assert.match(popupCss, /background-position:\s*center, var\(--custom-background-position\)/);
+  assert.match(popupCss, /\.background-image-preview\s*\{[^}]*touch-action:\s*none;/s);
+  assert.match(popupCss, /:root\[data-theme="glass"\] \.background-upload-button/);
   assert.match(popupCss, /\.trash-row\s*\{/);
   assert.match(popupCss, /\.favorite-row-in-folder\s*\{/);
   assert.match(popupCss, /\.favorite-row-card\s*\{/);

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="dist/SmartFav-Edge-1.14.4.zip"><strong>下载 1.14.4</strong></a>
+  <a href="dist/SmartFav-Edge-1.14.5.zip"><strong>下载 1.14.5</strong></a>
   ·
   <a href="#安装">安装说明</a>
   ·
@@ -44,7 +44,7 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 - 分类文件夹和分类内书签均支持鼠标拖动及 `Alt + 方向键` 排序。
 - 分类内单条书签可通过“移动”菜单跨分类转移。
 - 删除内容进入“最近删除”，默认保留 7 天，可恢复或立即永久删除。
-- 弹窗宽高、五种界面风格、明暗模式和自定义背景图均可调整。
+- 弹窗宽高、五种界面风格、明暗模式和自定义背景图均可调整；背景图支持拖动定位与方向键微调。
 
 ### 浏览器收藏夹同步
 
@@ -61,20 +61,28 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 
 当前仓库提供可直接用于 Edge / Chrome 开发者模式或扩展商店提交的安装包：
 
-- [`SmartFav-Edge-1.14.4.zip`](dist/SmartFav-Edge-1.14.4.zip)：Manifest V3 扩展包。
+- [`SmartFav-Edge-1.14.5.zip`](dist/SmartFav-Edge-1.14.5.zip)：Manifest V3 扩展包。
 - 公开仓库只保留当前版本安装包，不长期存放历史二进制文件。
 
 > 浏览器安全策略不允许把普通 ZIP 当作双击安装程序。GitHub 包适合开发者模式安装和商店提交；面向普通用户发布时，仍建议使用 Edge Add-ons 或 Chrome Web Store。
 
 ## 安装
 
-1. 下载 `SmartFav-Edge-1.14.4.zip` 并解压。
+1. 下载 `SmartFav-Edge-1.14.5.zip` 并解压。
 2. 打开 `edge://extensions/` 或 `chrome://extensions/`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
 5. 选择解压后包含 `manifest.json` 的目录。
 
 安装完成后，点击工具栏中的 SmartFav 图标即可打开插件。普通 `http://` 或 `https://` 网页可以收藏；`edge://`、`chrome://`、扩展商店和其他浏览器保护页面仍可查看已有收藏与设置，但浏览器不允许扩展读取或收藏这些页面。
+
+## 1.14.5 更新
+
+- 自定义背景图改为大尺寸取景预览，可直接拖动图片选择显示区域；方向键支持 2% 微调，按住 `Shift` 时按 10% 调整。
+- 背景横向和纵向位置会随设置自动保存，重新打开插件仍保持选定位置；新增“一键居中”。
+- 毛玻璃主题统一外壳、内容面板、下拉框、次级按钮、标签、分类卡片和设置控件的半透明材质，不再混入高不透明度白底。
+- 降低自定义图片上方的白色遮罩，提高背景可见度；明暗模式分别使用适合的透明度与模糊强度。
+- 旧版本没有位置数据时会自动迁移为居中显示，不影响已有背景图、收藏、分类和同步设置。
 
 ## 1.14.4 更新
 
@@ -122,8 +130,8 @@ SmartFav 点击工具栏图标即可打开，不注入网页，也不创建独�
 ```bash
 find smartFav智能收藏夹 -name '*.js' -print0 | xargs -0 -n1 node --check
 node tests/verify-extension.js
-unzip -t dist/SmartFav-Edge-1.14.4.zip
-node tests/verify-release-package.js dist/SmartFav-Edge-1.14.4.zip
+unzip -t dist/SmartFav-Edge-1.14.5.zip
+node tests/verify-release-package.js dist/SmartFav-Edge-1.14.5.zip
 ```
 
-当前扩展共 14 个 JavaScript 文件，其中后台新增 `state-store.js`、`bookmark-guard.js`、`favorites-service.js` 三层。1.14.4 已通过以上语法检查、真实 `importScripts` 加载验证、扩展自动化验证、跨入口并发压力验证、发布包源码一致性检查和 ZIP 完整性检查。
+当前扩展共 14 个 JavaScript 文件，其中后台包含 `state-store.js`、`bookmark-guard.js`、`favorites-service.js` 三层。1.14.5 已通过以上语法检查、真实 `importScripts` 加载验证、扩展自动化验证、跨入口并发压力验证、发布包源码一致性检查和 ZIP 完整性检查。

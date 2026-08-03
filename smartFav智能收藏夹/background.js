@@ -62,6 +62,8 @@ function createDefaultSettings(language) {
     popupWidth: 360,
     popupHeight: 560,
     customBackgroundImage: '',
+    customBackgroundPositionX: 50,
+    customBackgroundPositionY: 50,
     aiEnabled: false,
     aiAutoClassify: true,
     aiCreateCategories: false,

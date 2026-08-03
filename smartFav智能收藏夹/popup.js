@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   popupWidth: 360,
   popupHeight: 560,
   customBackgroundImage: '',
+  customBackgroundPositionX: 50,
+  customBackgroundPositionY: 50,
   aiEnabled: false,
   aiAutoClassify: true,
   aiCreateCategories: false,
@@ -242,6 +244,8 @@ const elements = {
   compactPopupHeightValue: document.getElementById('compactPopupHeightValue'),
   compactBackgroundImage: document.getElementById('compactBackgroundImage'),
   backgroundImagePreview: document.getElementById('backgroundImagePreview'),
+  backgroundPositionValue: document.getElementById('backgroundPositionValue'),
+  resetBackgroundPositionBtn: document.getElementById('resetBackgroundPositionBtn'),
   clearBackgroundImageBtn: document.getElementById('clearBackgroundImageBtn'),
   recentSection: document.getElementById('recentSection'),
   recentList: document.getElementById('recentList'),
@@ -289,6 +293,9 @@ let currentSettings = DEFAULT_SETTINGS;
 let categoryDraft = [];
 let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
 let pendingBackgroundImage = DEFAULT_SETTINGS.customBackgroundImage;
+let pendingBackgroundPositionX = DEFAULT_SETTINGS.customBackgroundPositionX;
+let pendingBackgroundPositionY = DEFAULT_SETTINGS.customBackgroundPositionY;
+let backgroundPositionDrag = null;
 let showingAllFavorites = false;
 let activeView = 'home';
 let activeFavoriteCategory = null;
@@ -709,6 +716,14 @@ async function loadSettings() {
     customBackgroundImage: typeof saved.customBackgroundImage === 'string'
       ? saved.customBackgroundImage
       : '',
+    customBackgroundPositionX: normalizeBackgroundPosition(
+      saved.customBackgroundPositionX,
+      DEFAULT_SETTINGS.customBackgroundPositionX
+    ),
+    customBackgroundPositionY: normalizeBackgroundPosition(
+      saved.customBackgroundPositionY,
+      DEFAULT_SETTINGS.customBackgroundPositionY
+    ),
     aiEnabled: typeof saved.aiEnabled === 'boolean' ? saved.aiEnabled : Boolean(saved.apiKey),
     aiAutoClassify: saved.aiAutoClassify !== false,
     aiCreateCategories: Boolean(saved.aiCreateCategories),
@@ -730,6 +745,8 @@ async function loadSettings() {
     || !Number.isFinite(Number(saved.popupWidth))
     || !Number.isFinite(Number(saved.popupHeight))
     || typeof saved.customBackgroundImage !== 'string'
+    || !Number.isFinite(Number(saved.customBackgroundPositionX))
+    || !Number.isFinite(Number(saved.customBackgroundPositionY))
     || typeof saved.aiAutoClassify !== 'boolean'
     || typeof saved.aiCreateCategories !== 'boolean'
     || !['weighted', 'vector'].includes(saved.classificationMode)
@@ -754,6 +771,12 @@ function normalizePopupDimension(value, minimum, maximum, fallback) {
   return Math.round(Math.min(maximum, Math.max(minimum, parsed)) / 20) * 20;
 }
 
+function normalizeBackgroundPosition(value, fallback = 50) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.round(Math.min(100, Math.max(0, parsed)) * 10) / 10;
+}
+
 function applyAppearance(settings = currentSettings) {
   const themeStyle = normalizeThemeStyle(settings.themeStyle);
   const colorMode = themeStyle === 'black' || settings.colorMode === 'dark' ? 'dark' : 'light';
@@ -772,11 +795,23 @@ function applyAppearance(settings = currentSettings) {
   const customBackgroundImage = typeof settings.customBackgroundImage === 'string'
     ? settings.customBackgroundImage
     : '';
+  const customBackgroundPositionX = normalizeBackgroundPosition(
+    settings.customBackgroundPositionX,
+    DEFAULT_SETTINGS.customBackgroundPositionX
+  );
+  const customBackgroundPositionY = normalizeBackgroundPosition(
+    settings.customBackgroundPositionY,
+    DEFAULT_SETTINGS.customBackgroundPositionY
+  );
   document.documentElement.dataset.theme = themeStyle;
   document.documentElement.dataset.mode = colorMode;
   document.documentElement.dataset.customBackground = customBackgroundImage ? 'true' : 'false';
   document.documentElement.style.setProperty('--popup-width', `${popupWidth}px`);
   document.documentElement.style.setProperty('--popup-height', `${popupHeight}px`);
+  document.documentElement.style.setProperty(
+    '--custom-background-position',
+    `${customBackgroundPositionX}% ${customBackgroundPositionY}%`
+  );
   document.documentElement.style.setProperty(
     '--custom-background-image',
     customBackgroundImage ? `url(${JSON.stringify(customBackgroundImage)})` : 'none'
@@ -2234,6 +2269,14 @@ function populateCompactSettings() {
   elements.compactThemeStyle.value = normalizeThemeStyle(currentSettings.themeStyle);
   previewThemeStyle = elements.compactThemeStyle.value;
   pendingBackgroundImage = currentSettings.customBackgroundImage || '';
+  pendingBackgroundPositionX = normalizeBackgroundPosition(
+    currentSettings.customBackgroundPositionX,
+    DEFAULT_SETTINGS.customBackgroundPositionX
+  );
+  pendingBackgroundPositionY = normalizeBackgroundPosition(
+    currentSettings.customBackgroundPositionY,
+    DEFAULT_SETTINGS.customBackgroundPositionY
+  );
   elements.compactDarkMode.checked = currentSettings.colorMode === 'dark'
     || currentSettings.themeStyle === 'black';
   elements.compactPopupWidth.value = String(currentSettings.popupWidth);
@@ -2591,7 +2634,9 @@ function updateAppearancePreview() {
       600,
       DEFAULT_SETTINGS.popupHeight
     ),
-    customBackgroundImage: pendingBackgroundImage
+    customBackgroundImage: pendingBackgroundImage,
+    customBackgroundPositionX: pendingBackgroundPositionX,
+    customBackgroundPositionY: pendingBackgroundPositionY
   });
   previewThemeStyle = themeStyle;
 }
@@ -2614,11 +2659,107 @@ function updatePopupSizeLabels() {
 }
 
 function updateBackgroundImagePreview() {
-  elements.backgroundImagePreview.classList.toggle('has-image', Boolean(pendingBackgroundImage));
+  const hasImage = Boolean(pendingBackgroundImage);
+  elements.backgroundImagePreview.classList.toggle('has-image', hasImage);
   elements.backgroundImagePreview.style.backgroundImage = pendingBackgroundImage
     ? `url(${JSON.stringify(pendingBackgroundImage)})`
     : '';
-  elements.clearBackgroundImageBtn.disabled = !pendingBackgroundImage;
+  updateBackgroundPositionDisplay();
+  elements.backgroundImagePreview.tabIndex = hasImage ? 0 : -1;
+  elements.backgroundImagePreview.setAttribute('aria-disabled', String(!hasImage));
+  elements.clearBackgroundImageBtn.disabled = !hasImage;
+  elements.resetBackgroundPositionBtn.disabled = !hasImage;
+}
+
+function updateBackgroundPositionDisplay() {
+  const position = `${pendingBackgroundPositionX}% ${pendingBackgroundPositionY}%`;
+  elements.backgroundImagePreview.style.backgroundPosition =
+    position;
+  document.documentElement.style.setProperty('--custom-background-position', position);
+  elements.backgroundPositionValue.textContent =
+    `${Math.round(pendingBackgroundPositionX)}% · ${Math.round(pendingBackgroundPositionY)}%`;
+}
+
+function updatePendingBackgroundPosition(positionX, positionY) {
+  pendingBackgroundPositionX = normalizeBackgroundPosition(positionX);
+  pendingBackgroundPositionY = normalizeBackgroundPosition(positionY);
+  updateBackgroundPositionDisplay();
+}
+
+async function persistBackgroundPosition(statusKey = 'backgroundPositionSaved') {
+  await persistSettingsPatch(
+    {
+      customBackgroundPositionX: pendingBackgroundPositionX,
+      customBackgroundPositionY: pendingBackgroundPositionY
+    },
+    { applyAppearanceNow: true, statusKey }
+  );
+}
+
+function handleBackgroundPositionPointerDown(event) {
+  if (!pendingBackgroundImage || event.button !== 0) return;
+  const rect = elements.backgroundImagePreview.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  event.preventDefault();
+  backgroundPositionDrag = {
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startPositionX: pendingBackgroundPositionX,
+    startPositionY: pendingBackgroundPositionY,
+    width: rect.width,
+    height: rect.height
+  };
+  elements.backgroundImagePreview.classList.add('is-dragging');
+  elements.backgroundImagePreview.setPointerCapture(event.pointerId);
+}
+
+function handleBackgroundPositionPointerMove(event) {
+  if (!backgroundPositionDrag || event.pointerId !== backgroundPositionDrag.pointerId) return;
+  const offsetX = event.clientX - backgroundPositionDrag.startClientX;
+  const offsetY = event.clientY - backgroundPositionDrag.startClientY;
+  updatePendingBackgroundPosition(
+    backgroundPositionDrag.startPositionX - (offsetX / backgroundPositionDrag.width) * 100,
+    backgroundPositionDrag.startPositionY - (offsetY / backgroundPositionDrag.height) * 100
+  );
+}
+
+async function finishBackgroundPositionDrag(event) {
+  if (!backgroundPositionDrag || event.pointerId !== backgroundPositionDrag.pointerId) return;
+  const pointerId = backgroundPositionDrag.pointerId;
+  backgroundPositionDrag = null;
+  elements.backgroundImagePreview.classList.remove('is-dragging');
+  if (elements.backgroundImagePreview.hasPointerCapture(pointerId)) {
+    elements.backgroundImagePreview.releasePointerCapture(pointerId);
+  }
+  await persistBackgroundPosition();
+}
+
+async function handleBackgroundPositionKeydown(event) {
+  if (!pendingBackgroundImage) return;
+  const step = event.shiftKey ? 10 : 2;
+  const offsets = {
+    ArrowLeft: [-step, 0],
+    ArrowRight: [step, 0],
+    ArrowUp: [0, -step],
+    ArrowDown: [0, step]
+  };
+  const offset = offsets[event.key];
+  if (!offset) return;
+  event.preventDefault();
+  updatePendingBackgroundPosition(
+    pendingBackgroundPositionX + offset[0],
+    pendingBackgroundPositionY + offset[1]
+  );
+  await persistBackgroundPosition();
+}
+
+async function resetBackgroundPosition() {
+  updatePendingBackgroundPosition(
+    DEFAULT_SETTINGS.customBackgroundPositionX,
+    DEFAULT_SETTINGS.customBackgroundPositionY
+  );
+  await persistBackgroundPosition('backgroundPositionReset');
 }
 
 function readBackgroundImage(file) {
@@ -2657,10 +2798,16 @@ async function handleBackgroundImageChange() {
   if (!file) return;
   try {
     pendingBackgroundImage = await readBackgroundImage(file);
+    pendingBackgroundPositionX = DEFAULT_SETTINGS.customBackgroundPositionX;
+    pendingBackgroundPositionY = DEFAULT_SETTINGS.customBackgroundPositionY;
     updateBackgroundImagePreview();
     updateAppearancePreview();
     await persistSettingsPatch(
-      { customBackgroundImage: pendingBackgroundImage },
+      {
+        customBackgroundImage: pendingBackgroundImage,
+        customBackgroundPositionX: pendingBackgroundPositionX,
+        customBackgroundPositionY: pendingBackgroundPositionY
+      },
       { applyAppearanceNow: true, statusKey: 'backgroundImageReady' }
     );
   } catch (error) {
@@ -2672,10 +2819,16 @@ async function handleBackgroundImageChange() {
 
 async function clearBackgroundImage() {
   pendingBackgroundImage = '';
+  pendingBackgroundPositionX = DEFAULT_SETTINGS.customBackgroundPositionX;
+  pendingBackgroundPositionY = DEFAULT_SETTINGS.customBackgroundPositionY;
   updateBackgroundImagePreview();
   updateAppearancePreview();
   await persistSettingsPatch(
-    { customBackgroundImage: '' },
+    {
+      customBackgroundImage: '',
+      customBackgroundPositionX: pendingBackgroundPositionX,
+      customBackgroundPositionY: pendingBackgroundPositionY
+    },
     { applyAppearanceNow: true, statusKey: 'backgroundImageCleared' }
   );
 }
@@ -3218,6 +3371,12 @@ elements.compactPopupHeight.addEventListener('input', handlePopupSizeInput);
 elements.compactPopupWidth.addEventListener('change', handlePopupSizeChange);
 elements.compactPopupHeight.addEventListener('change', handlePopupSizeChange);
 elements.compactBackgroundImage.addEventListener('change', handleBackgroundImageChange);
+elements.backgroundImagePreview.addEventListener('pointerdown', handleBackgroundPositionPointerDown);
+elements.backgroundImagePreview.addEventListener('pointermove', handleBackgroundPositionPointerMove);
+elements.backgroundImagePreview.addEventListener('pointerup', finishBackgroundPositionDrag);
+elements.backgroundImagePreview.addEventListener('pointercancel', finishBackgroundPositionDrag);
+elements.backgroundImagePreview.addEventListener('keydown', handleBackgroundPositionKeydown);
+elements.resetBackgroundPositionBtn.addEventListener('click', resetBackgroundPosition);
 elements.clearBackgroundImageBtn.addEventListener('click', clearBackgroundImage);
 elements.compactKeywordWeight.addEventListener('input', () => {
   elements.compactKeywordWeightValue.textContent = elements.compactKeywordWeight.value;
