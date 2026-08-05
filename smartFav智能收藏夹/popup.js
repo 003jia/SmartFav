@@ -205,10 +205,27 @@ const elements = {
   pageLearningUndoBtn: document.getElementById('pageLearningUndoBtn'),
   errorStatus: document.getElementById('errorStatus'),
   errorMsg: document.getElementById('errorMsg'),
+  retryBootstrapBtn: document.getElementById('retryBootstrapBtn'),
+  favoritesSearchInput: document.getElementById('favoritesSearchInput'),
+  favoritesSearchClear: document.getElementById('favoritesSearchClear'),
+  favoritesEmptyState: document.getElementById('favoritesEmptyState'),
+  favoritesEmptyAction: document.getElementById('favoritesEmptyAction'),
+  favoritesNoResults: document.getElementById('favoritesNoResults'),
+  favoritesNoResultsAction: document.getElementById('favoritesNoResultsAction'),
+  categoriesSearchInput: document.getElementById('categoriesSearchInput'),
+  categoriesSearchClear: document.getElementById('categoriesSearchClear'),
+  categoriesEmptyState: document.getElementById('categoriesEmptyState'),
+  categoriesNoResults: document.getElementById('categoriesNoResults'),
+  categoriesNoResultsAction: document.getElementById('categoriesNoResultsAction'),
+  trashEmptyState: document.getElementById('trashEmptyState'),
   categorySection: document.getElementById('categorySection'),
   saveTitle: document.getElementById('saveTitle'),
   pageHost: document.getElementById('pageHost'),
   categorySelect: document.getElementById('categorySelect'),
+  categorySelectControl: document.getElementById('categorySelectControl'),
+  categorySelectButton: document.getElementById('categorySelectButton'),
+  categorySelectValue: document.getElementById('categorySelectValue'),
+  categorySelectMenu: document.getElementById('categorySelectMenu'),
   categorySummary: document.getElementById('categorySummary'),
   sourceBadge: document.getElementById('sourceBadge'),
   confidenceBadge: document.getElementById('confidenceBadge'),
@@ -280,6 +297,11 @@ const elements = {
   compactNewCategory: document.getElementById('compactNewCategory'),
   compactAddCategoryBtn: document.getElementById('compactAddCategoryBtn'),
   categoryKeywordAiAnalyzeBtn: document.getElementById('categoryKeywordAiAnalyzeBtn'),
+  aiOrganizationAnalyzeBtn: document.getElementById('aiOrganizationAnalyzeBtn'),
+  aiOrganizationPreview: document.getElementById('aiOrganizationPreview'),
+  aiOrganizationPreviewSummary: document.getElementById('aiOrganizationPreviewSummary'),
+  aiOrganizationOperations: document.getElementById('aiOrganizationOperations'),
+  aiOrganizationApplyBtn: document.getElementById('aiOrganizationApplyBtn'),
   categoryRulesList: document.getElementById('categoryRulesList'),
   categorySettingsStatus: document.getElementById('categorySettingsStatus'),
   categorySaveBtn: document.getElementById('categorySaveBtn'),
@@ -290,6 +312,7 @@ const elements = {
 let currentTabInfo = null;
 let currentSuggestion = null;
 let currentSettings = DEFAULT_SETTINGS;
+let currentFolders = [];
 let categoryDraft = [];
 let previewThemeStyle = DEFAULT_SETTINGS.themeStyle;
 let pendingBackgroundImage = DEFAULT_SETTINGS.customBackgroundImage;
@@ -299,6 +322,7 @@ let backgroundPositionDrag = null;
 let showingAllFavorites = false;
 let activeView = 'home';
 let activeFavoriteCategory = null;
+let activeCategoryParentId = null;
 let activeFavoriteOrder = {};
 let favoriteOpenSuppressUntil = 0;
 let aiEnhanceInFlight = false;
@@ -313,19 +337,52 @@ let pendingPageLearningUndo = null;
 let popupCloseTimer = null;
 let aiKeywordAnalysisInFlight = false;
 let categoryKeywordSuggestionCounts = {};
+let pendingAIFolderProposal = null;
+let activeAIOrganizationProposal = null;
 
-document.addEventListener('DOMContentLoaded', async () => {
+// 弹窗启动链路：任何一步抛错都必须收敛成「错误提示 + 重试入口」，
+// 否则用户只会看到永久停留的「正在读取当前网页」而无法自救。
+async function bootstrapPopup() {
   await recoverManagedBrowserFavorites();
   await cleanupRecentlyDeletedItems();
   currentSettings = await loadSettings();
+  await loadFolderState();
   applyLanguage();
   await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
+  initSearchAndEmptyStates();
+  updateEmptyStates();
   await analyzeCurrentTab();
   const requestedView = new URLSearchParams(window.location.search).get('view');
   await showView(['favorites', 'categories', 'trash', 'settings'].includes(requestedView)
     ? requestedView
     : 'home');
   await showPendingBrowserActivity();
+}
+
+async function runBootstrapWithRetry() {
+  if (elements.retryBootstrapBtn) {
+    elements.retryBootstrapBtn.classList.add('hidden');
+    elements.retryBootstrapBtn.disabled = true;
+  }
+  try {
+    await bootstrapPopup();
+  } catch (error) {
+    console.error('SmartFav popup bootstrap failed', error);
+    // applyLanguage 可能还没跑过，但 t() 只依赖 currentSettings.language，默认值可用。
+    showError(t('loadStateFailed'));
+    if (elements.retryBootstrapBtn) {
+      elements.retryBootstrapBtn.textContent = t('retryLoad');
+      elements.retryBootstrapBtn.classList.remove('hidden');
+      elements.retryBootstrapBtn.disabled = false;
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (elements.retryBootstrapBtn) {
+    elements.retryBootstrapBtn.addEventListener('click', () => { runBootstrapWithRetry(); });
+  }
+  runBootstrapWithRetry();
 });
 
 function t(key, variables) {
@@ -367,6 +424,58 @@ function storageSet(values) {
   });
 }
 
+async function loadFolderState() {
+  if (isExtension) {
+    const response = await sendRuntimeMessage('getFolderTree');
+    if (!response || response.status !== 'ok') {
+      throw new Error(response && response.message ? response.message : 'Folder tree unavailable');
+    }
+    currentFolders = SmartFavFolderTree.normalizeFolders(response.folders);
+    activeFavoriteOrder = normalizeFavoriteOrderMap(response.favoriteOrder);
+    return response;
+  }
+  const migration = SmartFavFolderTree.migrateState(previewState, {
+    language: currentSettings.language,
+    categories: currentSettings.categories,
+    keywordRules: currentSettings.keywordRules
+  });
+  Object.assign(previewState, migration);
+  currentFolders = migration.folders;
+  activeFavoriteOrder = migration.favoriteOrder;
+  return { status: 'ok', ...migration };
+}
+
+// 渲染路径上会对每个文件夹、每行收藏反复查路径与后代，逐次调用 getPathLabel /
+// getDescendantIds 会重跑 normalizeFolders，整体退化成 O(n²)~O(n³)。
+// 这里按 currentFolders 的数组身份缓存一份索引：currentFolders 每次都是整体替换，
+// 所以身份变化即等价于数据变化，不需要额外的失效逻辑。
+let folderIndexCache = { source: null, index: null };
+// renderFolders 当前渲染的层级：null 表示根层级。
+// 只有根层级的"空"才等于"一条收藏都没有"，子层级为空是另一回事。
+let favoritesListParentId = null;
+
+function getFolderIndex() {
+  if (folderIndexCache.source !== currentFolders) {
+    folderIndexCache = {
+      source: currentFolders,
+      index: SmartFavFolderTree.createIndex(currentFolders)
+    };
+  }
+  return folderIndexCache.index;
+}
+
+function getFolderPathLabel(folderId) {
+  return getFolderIndex().pathLabel(folderId);
+}
+
+function getFolderDescendantIds(folderId) {
+  return getFolderIndex().descendantIds(folderId);
+}
+
+function classifyCurrentFolders(tabInfo) {
+  return SmartFavClassifier.classifyFolders(tabInfo, currentSettings, currentFolders);
+}
+
 async function updateStoredSettings(settingsPatch) {
   if (!isExtension) {
     const settings = { ...(previewState.settings || {}), ...settingsPatch };
@@ -382,19 +491,19 @@ async function updateStoredSettings(settingsPatch) {
   return response.settings;
 }
 
-async function updateStoredFavoriteOrder(category, orderedUrls) {
+async function updateStoredFavoriteOrder(folderId, orderedFavoriteIds) {
   if (!isExtension) {
     const result = await storageGet(['favoriteOrder']);
     const nextFavoriteOrder = {
       ...(result.favoriteOrder || {}),
-      [category]: orderedUrls
+      [folderId]: orderedFavoriteIds
     };
     await storageSet({ favoriteOrder: nextFavoriteOrder });
     return nextFavoriteOrder;
   }
   const response = await sendRuntimeMessage('updateFavoriteOrder', {
-    category,
-    orderedUrls
+    folderId,
+    orderedFavoriteIds
   });
   if (!response || response.status !== 'ok' || !response.favoriteOrder) {
     throw new Error(
@@ -526,6 +635,117 @@ function handlePreviewRuntimeMessage(type, payload = {}) {
       imported: previewState.bookmarkRestorePoints.length
     };
   }
+  if (type === 'getFolderTree') {
+    return {
+      status: 'ok',
+      folderSchemaVersion: SmartFavFolderTree.SCHEMA_VERSION,
+      folders: SmartFavFolderTree.normalizeFolders(previewState.folders),
+      favorites: previewState.favorites,
+      favoriteOrder: previewState.favoriteOrder
+    };
+  }
+  if (type === 'createFolder') {
+    const result = SmartFavFolderTree.createFolder(previewState.folders, payload.folder || {});
+    if (result.status === 'ok') previewState.folders = result.folders;
+    return result;
+  }
+  if (type === 'updateFolder') {
+    const result = SmartFavFolderTree.updateFolder(
+      previewState.folders,
+      payload.folderId,
+      payload.patch || {}
+    );
+    if (result.status === 'ok') {
+      previewState.folders = result.folders;
+      previewState.favorites = previewState.favorites.map((favorite) => ({
+        ...favorite,
+        category: SmartFavFolderTree.getPathLabel(result.folders, favorite.folderId)
+      }));
+    }
+    return result;
+  }
+  if (type === 'moveFolder') {
+    const result = SmartFavFolderTree.moveFolder(
+      previewState.folders,
+      payload.folderId,
+      payload.targetParentId,
+      payload.index
+    );
+    if (result.status === 'ok') {
+      previewState.folders = result.folders;
+      previewState.favorites = previewState.favorites.map((favorite) => ({
+        ...favorite,
+        category: SmartFavFolderTree.getPathLabel(result.folders, favorite.folderId)
+      }));
+    }
+    return result;
+  }
+  if (type === 'deleteFolder') {
+    const result = SmartFavFolderTree.deleteFolder(
+      previewState.folders,
+      previewState.favorites,
+      previewState.favoriteOrder,
+      payload.folderId,
+      payload.targetFolderId
+    );
+    if (result.status === 'ok') {
+      previewState.folders = result.folders;
+      previewState.favorites = result.favorites;
+      previewState.favoriteOrder = result.favoriteOrder;
+    }
+    return result;
+  }
+  if (type === 'moveFavorite') {
+    const favorite = previewState.favorites.find((item) => item.id === payload.favoriteId);
+    const target = SmartFavFolderTree.getFolder(previewState.folders, payload.targetFolderId);
+    if (!favorite || !target) return { status: 'invalid', moved: 0 };
+    previewState.favorites = previewState.favorites.map((item) => item.id === favorite.id
+      ? {
+        ...item,
+        folderId: target.id,
+        category: SmartFavFolderTree.getPathLabel(previewState.folders, target.id),
+        manuallyCategorized: true
+      }
+      : item);
+    const nextOrder = {};
+    Object.entries(previewState.favoriteOrder || {}).forEach(([folderId, ids]) => {
+      const retained = (Array.isArray(ids) ? ids : []).filter((id) => id !== favorite.id);
+      if (retained.length) nextOrder[folderId] = retained;
+    });
+    const targetOrder = nextOrder[target.id] || [];
+    const index = Math.max(0, Math.min(targetOrder.length, Number.isFinite(Number(payload.index))
+      ? Number(payload.index)
+      : targetOrder.length));
+    targetOrder.splice(index, 0, favorite.id);
+    nextOrder[target.id] = targetOrder;
+    previewState.favoriteOrder = nextOrder;
+    return {
+      status: 'ok',
+      moved: 1,
+      favorite: previewState.favorites.find((item) => item.id === favorite.id),
+      favoriteOrder: nextOrder
+    };
+  }
+  if (type === 'previewAIOrganization') {
+    const validated = SmartFavAIOrganization.validateOperations(
+      payload.operations,
+      previewState.folders,
+      previewState.favorites,
+      SmartFavFolderTree
+    );
+    if (!validated.operations.length) {
+      return { status: 'invalid', operations: [], rejected: validated.rejected };
+    }
+    const proposalId = SmartFavFolderTree.createId('proposal');
+    const proposal = { id: proposalId, operations: validated.operations };
+    previewState.aiOrganizationPreviews = [proposal];
+    return {
+      status: validated.rejected.length ? 'partial' : 'ok',
+      proposalId,
+      operations: validated.operations,
+      rejected: validated.rejected
+    };
+  }
   if (type === 'moveFavoriteToCategory') {
     const localResult = SmartFavOrder.moveFavoriteAcrossCategories(
       previewState.favorites,
@@ -648,7 +868,10 @@ if (
         console.error('SmartFav activity display failed:', error);
       });
     }
-    if (changes.favorites || changes.recentlyDeleted) {
+    if (changes.folders) {
+      currentFolders = SmartFavFolderTree.normalizeFolders(changes.folders.newValue);
+    }
+    if (changes.favorites || changes.recentlyDeleted || changes.folders) {
       const categoryToKeep = activeView === 'favorites' ? activeFavoriteCategory : null;
       Promise.all([
         renderFolders(),
@@ -845,6 +1068,8 @@ function applyLanguage() {
   elements.settingsBtn.textContent = t(isHome ? 'settings' : 'back');
   elements.settingsBtn.setAttribute('aria-label', t(isHome ? 'openSettings' : 'backToHome'));
   elements.brandCaption.textContent = t(captionKeys[activeView] || 'saveCurrentPage');
+  // 分组摘要是运行时拼出来的，data-i18n 兜不住，换语言后要重算一遍。
+  updateSettingsGroupSummaries();
   applyAppearance();
 }
 
@@ -898,7 +1123,7 @@ async function switchLanguage() {
   applyLanguage();
   await Promise.all([renderFolders(), renderRecentFavorites(), renderRecentlyDeleted()]);
   if (currentTabInfo) {
-    currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+    currentSuggestion = classifyCurrentFolders(currentTabInfo);
     showCategorySuggestion(currentSuggestion);
     if (currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
       await enhanceCurrentSuggestion({ automatic: true });
@@ -943,7 +1168,7 @@ async function analyzeCurrentTab() {
       };
     }
 
-    currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+    currentSuggestion = classifyCurrentFolders(currentTabInfo);
     showCategorySuggestion(currentSuggestion);
     if (currentSettings.aiEnabled && currentSettings.aiAutoClassify) {
       await enhanceCurrentSuggestion({ automatic: true });
@@ -956,6 +1181,14 @@ async function analyzeCurrentTab() {
 
 function isSupportedUrl(url) {
   return Boolean(url) && !/^(chrome|edge|about|chrome-extension):/.test(url);
+}
+
+// 是否允许点击后导航。escapeHtml 只防属性逃逸，不防协议：
+// 批量整理会把书签栏里的 bookmarklet（javascript:...）当成普通网址导入，
+// 之后点击就会在扩展页/预览页上下文执行。这里统一用 constants.js 的协议白名单
+// 收口，收藏列表、favicon 与 openUrl 三处都必须过这一关。
+function isSafeNavigableUrl(url) {
+  return SmartFavConstants.isSafeNavigableUrl(url);
 }
 
 function getPageContent(tabId) {
@@ -987,18 +1220,96 @@ function getPageContent(tabId) {
   });
 }
 
+function getCategorySelectOptionButtons() {
+  return Array.from(elements.categorySelectMenu.querySelectorAll('.category-select-option'));
+}
+
+function syncCategorySelectControl() {
+  const selectedOption = elements.categorySelect.selectedOptions[0] || null;
+  const selectedValue = elements.categorySelect.value;
+  const selectedLabel = selectedOption ? selectedOption.textContent.trim() : '';
+  elements.categorySelectValue.textContent = selectedLabel;
+  elements.categorySelectButton.title = selectedLabel;
+  getCategorySelectOptionButtons().forEach((button) => {
+    button.setAttribute('aria-selected', button.dataset.value === selectedValue ? 'true' : 'false');
+  });
+}
+
+function focusCategorySelectOption(index) {
+  const options = getCategorySelectOptionButtons();
+  if (!options.length) return;
+  const nextIndex = Math.max(0, Math.min(options.length - 1, index));
+  options[nextIndex].focus();
+  elements.categorySelectButton.setAttribute('aria-activedescendant', options[nextIndex].id);
+}
+
+function setCategorySelectOpen(open, { focusSelected = false, restoreFocus = false } = {}) {
+  const shouldOpen = Boolean(open) && elements.categorySelect.options.length > 0;
+  elements.categorySelectControl.classList.toggle('is-open', shouldOpen);
+  elements.categorySection.classList.toggle('has-open-select', shouldOpen);
+  elements.categorySelectMenu.classList.toggle('hidden', !shouldOpen);
+  elements.categorySelectButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  if (!shouldOpen) {
+    elements.categorySelectButton.removeAttribute('aria-activedescendant');
+    if (restoreFocus) elements.categorySelectButton.focus();
+    return;
+  }
+  if (focusSelected) {
+    const selectedIndex = Math.max(0, elements.categorySelect.selectedIndex);
+    requestAnimationFrame(() => focusCategorySelectOption(selectedIndex));
+  }
+}
+
+function renderCategorySelectControl() {
+  const selectedValue = elements.categorySelect.value;
+  elements.categorySelectMenu.innerHTML = Array.from(elements.categorySelect.options)
+    .map((option, index) => `
+      <button
+        id="categorySelectOption-${index}"
+        class="category-select-option"
+        type="button"
+        role="option"
+        tabindex="-1"
+        data-value="${escapeHtml(option.value)}"
+        aria-selected="${option.value === selectedValue ? 'true' : 'false'}"
+      >
+        <span>${escapeHtml(option.textContent)}</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m3.5 8 3 3 6-6.5"></path>
+        </svg>
+      </button>
+    `)
+    .join('');
+  syncCategorySelectControl();
+  setCategorySelectOpen(false);
+}
+
+function selectCategoryFromControl(value) {
+  if (!Array.from(elements.categorySelect.options).some((option) => option.value === value)) return;
+  elements.categorySelect.value = value;
+  elements.categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  setCategorySelectOpen(false, { restoreFocus: true });
+}
+
 function showCategorySuggestion(suggestion) {
   elements.loadingStatus.classList.add('hidden');
   elements.errorStatus.classList.add('hidden');
   elements.categorySection.classList.remove('hidden');
   elements.saveTitle.textContent = currentTabInfo.title || t('untitledPage');
   elements.pageHost.textContent = getHostname(currentTabInfo.url);
-  elements.categorySelect.innerHTML = currentSettings.categories
-    .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
+  const folderOptions = [...currentFolders].sort((left, right) => (
+    getFolderPathLabel(left.id).localeCompare(getFolderPathLabel(right.id))
+  ));
+  elements.categorySelect.innerHTML = folderOptions
+    .map((folder) => (
+      `<option value="${escapeHtml(folder.id)}">${escapeHtml(getFolderPathLabel(folder.id))}</option>`
+    ))
     .join('');
-  elements.categorySelect.value = currentSettings.categories.includes(suggestion.category)
-    ? suggestion.category
-    : currentSettings.categories[currentSettings.categories.length - 1];
+  const fallback = SmartFavFolderTree.getFallbackFolder(currentFolders, currentSettings.language);
+  elements.categorySelect.value = currentFolders.some((folder) => folder.id === suggestion.folderId)
+    ? suggestion.folderId
+    : (fallback && fallback.id) || (folderOptions[0] && folderOptions[0].id) || '';
+  renderCategorySelectControl();
   recommendedCategory = elements.categorySelect.value;
   resetPageLearningOption();
   elements.categorySummary.textContent = suggestion.summary;
@@ -1032,15 +1343,13 @@ function showCategorySuggestion(suggestion) {
 }
 
 function updateConfirmLabel() {
-  const category = elements.categorySelect.value || t('bookmarksFallback');
+  const category = getFolderPathLabel(elements.categorySelect.value) || t('bookmarksFallback');
   elements.confirmBtn.textContent = t('saveToCategory', { category });
 }
 
 function getFallbackCategory() {
-  const preferred = currentSettings.language === 'zh_CN' ? '其他' : 'Other';
-  return currentSettings.categories.includes(preferred)
-    ? preferred
-    : currentSettings.categories[currentSettings.categories.length - 1];
+  const fallback = SmartFavFolderTree.getFallbackFolder(currentFolders, currentSettings.language);
+  return fallback ? fallback.id : '';
 }
 
 function resetPageLearningOption() {
@@ -1061,11 +1370,7 @@ function updatePageLearningOption() {
     resetPageLearningOption();
     return;
   }
-  const proposal = SmartFavClassifier.createDomainLearningProposal(
-    currentTabInfo,
-    targetCategory,
-    currentSettings
-  );
+  const proposal = buildFolderDomainLearningProposal(currentTabInfo, targetCategory);
   if (!proposal) {
     resetPageLearningOption();
     return;
@@ -1076,25 +1381,73 @@ function updatePageLearningOption() {
   elements.pageLearningOption.classList.remove('hidden');
   if (isFallback) {
     elements.pageLearningDescription.textContent = t('rememberManualCategoryFallback');
-  } else if (proposal.previousCategories.length) {
+  } else if (proposal.previousFolderIds.length) {
     elements.pageLearningDescription.textContent = t('rememberManualCategoryConflict', {
       domain: proposal.domain,
-      categories: proposal.previousCategories.join(
+      categories: proposal.previousFolderIds.map(getFolderPathLabel).join(
         currentSettings.language === 'zh_CN' ? '、' : ', '
       ),
-      category: proposal.targetCategory
+      category: getFolderPathLabel(proposal.targetFolderId)
     });
   } else {
     elements.pageLearningDescription.textContent = t('rememberManualCategoryDescription', {
       domain: proposal.domain,
-      category: proposal.targetCategory
+      category: getFolderPathLabel(proposal.targetFolderId)
     });
   }
 }
 
 elements.categorySelect.addEventListener('change', () => {
+  syncCategorySelectControl();
   updateConfirmLabel();
   updatePageLearningOption();
+});
+
+elements.categorySelectButton.addEventListener('click', () => {
+  const open = !elements.categorySelectControl.classList.contains('is-open');
+  setCategorySelectOpen(open, { focusSelected: open });
+});
+
+elements.categorySelectButton.addEventListener('keydown', (event) => {
+  if (!['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Escape'].includes(event.key)) return;
+  event.preventDefault();
+  if (event.key === 'Escape') {
+    setCategorySelectOpen(false);
+    return;
+  }
+  setCategorySelectOpen(true, { focusSelected: true });
+});
+
+elements.categorySelectMenu.addEventListener('click', (event) => {
+  const option = event.target.closest('.category-select-option');
+  if (!option) return;
+  selectCategoryFromControl(option.dataset.value);
+});
+
+elements.categorySelectMenu.addEventListener('keydown', (event) => {
+  const option = event.target.closest('.category-select-option');
+  if (!option) return;
+  const options = getCategorySelectOptionButtons();
+  const index = options.indexOf(option);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    focusCategorySelectOption(index + (event.key === 'ArrowDown' ? 1 : -1));
+  } else if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault();
+    focusCategorySelectOption(event.key === 'Home' ? 0 : options.length - 1);
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    selectCategoryFromControl(option.dataset.value);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    setCategorySelectOpen(false, { restoreFocus: true });
+  } else if (event.key === 'Tab') {
+    setCategorySelectOpen(false);
+  }
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (!elements.categorySelectControl.contains(event.target)) setCategorySelectOpen(false);
 });
 
 elements.enhanceBtn.addEventListener('click', () => {
@@ -1112,13 +1465,7 @@ async function enhanceCurrentSuggestion({ automatic = false } = {}) {
     const suggestion = await applyAIResponse(response);
     currentSuggestion = suggestion;
     showCategorySuggestion(suggestion);
-    if (suggestion.createdCategory) {
-      elements.aiMessage.textContent = t('aiCategoryCreated', {
-        category: suggestion.createdCategory
-      });
-      elements.aiMessage.classList.remove('hidden');
-      await renderFolders();
-    }
+    if (suggestion.proposedFolder) renderAIFolderProposal(suggestion.proposedFolder);
   } catch (error) {
     elements.aiMessage.textContent = t('aiFallbackKept', { message: error.message });
     elements.aiMessage.classList.remove('hidden');
@@ -1130,17 +1477,17 @@ async function enhanceCurrentSuggestion({ automatic = false } = {}) {
 }
 
 function buildClassificationPrompt(tabInfo) {
-  const localEvidence = SmartFavClassifier.classify(tabInfo, currentSettings);
+  const localEvidence = classifyCurrentFolders(tabInfo);
   const separator = currentSettings.language === 'zh_CN' ? '、' : ', ';
-  const rules = currentSettings.categories
-    .map((category) => {
-      const keywords = currentSettings.keywordRules[category] || [];
-      return `${category}=${keywords.join(', ')}`;
+  const rules = currentFolders
+    .map((folder) => {
+      const path = getFolderPathLabel(folder.id);
+      return `${folder.id}|${path}=${(folder.keywords || []).join(', ')}`;
     })
     .join('\n');
   const evidence = Object.entries(localEvidence.scoreRatios || {})
     .sort((left, right) => right[1] - left[1])
-    .map(([category, ratio]) => `${category}:${ratio}%`)
+    .map(([folderId, ratio]) => `${folderId}|${getFolderPathLabel(folderId)}:${ratio}%`)
     .join(separator);
   const weights = localEvidence.weights || SmartFavClassifier.DEFAULT_WEIGHTS;
   return t('classifyPrompt', {
@@ -1148,7 +1495,7 @@ function buildClassificationPrompt(tabInfo) {
     url: tabInfo.url,
     description: tabInfo.description,
     keywords: Array.isArray(tabInfo.keywords) ? tabInfo.keywords.join(separator) : '',
-    categories: currentSettings.categories.join(separator),
+    categories: currentFolders.map((folder) => `${folder.id}|${getFolderPathLabel(folder.id)}`).join(separator),
     rules,
     strategy: localEvidence.method,
     evidence,
@@ -1170,52 +1517,91 @@ async function applyAIResponse(response) {
   const match = String(response || '').match(/\{[\s\S]*\}/);
   if (!match) throw new Error(t('aiResponseInvalid'));
   const parsed = JSON.parse(match[0]);
-  const preferredFallback = currentSettings.language === 'zh_CN' ? '其他' : 'Other';
-  const fallback = currentSettings.categories.includes(preferredFallback)
-    ? preferredFallback
-    : currentSettings.categories[currentSettings.categories.length - 1];
-  const requestedCategory = sanitizeAICategoryName(parsed.newCategory || parsed.category);
-  const existingCategory = currentSettings.categories.find(
-    (category) => normalizeCategoryName(category) === normalizeCategoryName(requestedCategory)
-  );
-  let category = existingCategory || fallback;
-  let createdCategory = '';
-
-  if (
-    !existingCategory
-    && requestedCategory
-    && currentSettings.aiCreateCategories
-    && currentSettings.categories.length < 50
-  ) {
-    const proposedKeywords = [
-      ...(Array.isArray(parsed.newKeywords) ? parsed.newKeywords : []),
-      ...(Array.isArray(parsed.keywords) ? parsed.keywords : []),
-      ...(Array.isArray(parsed.tags) ? parsed.tags : [])
-    ];
-    const keywords = splitKeywords(proposedKeywords.join(',')).slice(0, 16);
-    const nextSettings = {
-      ...currentSettings,
-      categories: [...currentSettings.categories, requestedCategory],
-      keywordRules: {
-        ...currentSettings.keywordRules,
-        [requestedCategory]: keywords
+  const fallback = SmartFavFolderTree.getFallbackFolder(currentFolders, currentSettings.language);
+  const requestedPath = sanitizeAICategoryName(parsed.category || parsed.folderPath);
+  const requestedFolder = currentFolders.find((folder) => folder.id === parsed.targetFolderId)
+    || currentFolders.find((folder) => (
+      normalizeCategoryName(getFolderPathLabel(folder.id)) === normalizeCategoryName(requestedPath)
+    ));
+  const parsedConfidence = Number(parsed.confidence);
+  const confidence = Math.max(0, Math.min(1, Number.isFinite(parsedConfidence)
+    ? parsedConfidence
+    : (requestedFolder ? 0.8 : 0)));
+  const selectedFolder = requestedFolder && confidence >= 0.75 ? requestedFolder : fallback;
+  const rawProposal = parsed.proposedFolder || (parsed.newCategory
+    ? {
+        parentId: parsed.parentId || (selectedFolder && selectedFolder.parentId),
+        name: parsed.newCategory,
+        keywords: parsed.newKeywords
       }
-    };
-    currentSettings = await updateStoredSettings({
-      categories: nextSettings.categories,
-      keywordRules: nextSettings.keywordRules
-    });
-    category = requestedCategory;
-    createdCategory = requestedCategory;
+    : null);
+  let proposedFolder = null;
+  if (currentSettings.aiCreateCategories && rawProposal) {
+    const name = sanitizeAICategoryName(rawProposal.name);
+    const parentId = currentFolders.some((folder) => folder.id === rawProposal.parentId)
+      ? rawProposal.parentId
+      : null;
+    if (name && !SmartFavFolderTree.findSiblingByName(currentFolders, parentId, name)) {
+      proposedFolder = {
+        parentId,
+        name,
+        keywords: splitKeywords(Array.isArray(rawProposal.keywords)
+          ? rawProposal.keywords.join(',')
+          : rawProposal.keywords).slice(0, 16)
+      };
+    }
   }
 
   return {
-    category,
+    category: selectedFolder ? getFolderPathLabel(selectedFolder.id) : '',
+    folderId: selectedFolder ? selectedFolder.id : '',
+    folderPath: selectedFolder ? getFolderPathLabel(selectedFolder.id) : '',
+    confidence: confidence >= 0.75 ? 'high' : confidence >= 0.5 ? 'medium' : 'low',
     tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 4).map(String) : [],
-    summary: String(parsed.summary || t('aiSummaryFallback')),
+    summary: String(parsed.reason || parsed.summary || t('aiSummaryFallback')),
     source: 'ai',
-    createdCategory
+    proposedFolder
   };
+}
+
+function renderAIFolderProposal(proposal) {
+  pendingAIFolderProposal = proposal;
+  const parentPath = proposal.parentId ? getFolderPathLabel(proposal.parentId) : t('favoriteCategories');
+  elements.aiMessage.innerHTML = `
+    <span>${escapeHtml(`${parentPath} › ${proposal.name}`)}</span>
+    <button class="inline-message-action" id="confirmAIFolderProposal" type="button">${escapeHtml(t('confirmCreate'))}</button>
+  `;
+  elements.aiMessage.classList.remove('hidden');
+  document.getElementById('confirmAIFolderProposal').addEventListener('click', confirmAIFolderProposal);
+}
+
+async function confirmAIFolderProposal() {
+  if (!pendingAIFolderProposal) return;
+  const response = await sendRuntimeMessage('createFolder', { folder: {
+    ...pendingAIFolderProposal,
+    source: 'ai'
+  } });
+  if (!response || response.status !== 'ok') {
+    elements.aiMessage.textContent = response && response.message
+      ? response.message
+      : t('browserBookmarkUnavailable');
+    return;
+  }
+  pendingAIFolderProposal = null;
+  await loadFolderState();
+  elements.categorySelect.innerHTML = currentFolders
+    .map((folder) => `<option value="${escapeHtml(folder.id)}">${escapeHtml(getFolderPathLabel(folder.id))}</option>`)
+    .join('');
+  elements.categorySelect.value = response.folder.id;
+  renderCategorySelectControl();
+  currentSuggestion = {
+    ...currentSuggestion,
+    folderId: response.folder.id,
+    category: getFolderPathLabel(response.folder.id),
+    folderPath: getFolderPathLabel(response.folder.id)
+  };
+  elements.aiMessage.textContent = t('aiCategoryCreated', { category: currentSuggestion.category });
+  updateConfirmLabel();
 }
 
 elements.confirmBtn.addEventListener('click', async () => {
@@ -1223,26 +1609,26 @@ elements.confirmBtn.addEventListener('click', async () => {
   elements.confirmBtn.disabled = true;
   elements.errorStatus.classList.add('hidden');
   try {
-    const selectedCategory = elements.categorySelect.value;
+    const selectedFolderId = elements.categorySelect.value;
+    const selectedCategory = getFolderPathLabel(selectedFolderId);
     const shouldLearn = Boolean(
       currentPageLearningProposal
-      && currentPageLearningProposal.targetCategory === selectedCategory
+      && currentPageLearningProposal.targetFolderId === selectedFolderId
       && elements.pageLearningCheckbox.checked
     );
     const learningResult = shouldLearn
-      ? SmartFavClassifier.applyDomainLearning(
-        currentSettings,
-        currentPageLearningProposal
-      )
+      ? createFolderLearningResult(currentPageLearningProposal)
       : null;
     const favorite = {
       ...currentTabInfo,
       category: selectedCategory,
+      folderId: selectedFolderId,
       tags: currentSuggestion.tags,
       summary: currentSuggestion.summary,
       classificationSource: currentSuggestion.source,
-      suggestedCategory: recommendedCategory,
-      manuallyCategorized: selectedCategory !== recommendedCategory,
+      suggestedCategory: getFolderPathLabel(recommendedCategory),
+      suggestedFolderId: recommendedCategory,
+      manuallyCategorized: selectedFolderId !== recommendedCategory,
       createdAt: Date.now()
     };
 
@@ -1250,18 +1636,29 @@ elements.confirmBtn.addEventListener('click', async () => {
     // 并使用带内部操作标记的书签 API，避免与浏览器事件回流互相覆盖。
     let successKey = 'savedToSmartFav';
     if (isExtension) {
+      if (learningResult) {
+        for (const [folderId, keywords] of Object.entries(learningResult.folderUpdates)) {
+          const folderResponse = await sendRuntimeMessage('updateFolder', {
+            folderId,
+            patch: { keywords }
+          });
+          if (!folderResponse || folderResponse.status !== 'ok') {
+            throw new Error(folderResponse && folderResponse.message
+              ? folderResponse.message
+              : t('learningSaveFailed'));
+          }
+        }
+        await loadFolderState();
+      }
       const response = await sendRuntimeMessage('saveFavorite', {
         favorite,
-        settingsPatch: learningResult
-          ? { keywordRules: learningResult.settings.keywordRules }
-          : null
+        settingsPatch: null
       });
       if (!response || response.status !== 'ok') {
         throw new Error(response && response.message
           ? response.message
           : t('browserBookmarkUnavailable'));
       }
-      if (learningResult) currentSettings = response.settings || learningResult.settings;
       const bookmarkStatus = (response.bookmark && response.bookmark.status) || 'disabled';
       if (bookmarkStatus === 'unavailable' || bookmarkStatus === 'error') {
         successKey = 'savedBrowserFailed';
@@ -1272,11 +1669,14 @@ elements.confirmBtn.addEventListener('click', async () => {
       const result = await storageGet(['favorites']);
       const favorites = Array.isArray(result.favorites) ? result.favorites : [];
       const storageValues = {
-        favorites: [favorite, ...favorites.filter((item) => item.url !== favorite.url)]
+        favorites: [
+          { ...favorite, id: favorite.id || SmartFavFolderTree.createId('fav') },
+          ...(currentSettings.bookmarkWriteMode === 'add'
+            ? favorites
+            : favorites.filter((item) => item.url !== favorite.url))
+        ]
       };
-      if (learningResult) storageValues.settings = learningResult.settings;
       await storageSet(storageValues);
-      if (learningResult) currentSettings = learningResult.settings;
     }
 
     pendingPageLearningUndo = learningResult;
@@ -1285,7 +1685,7 @@ elements.confirmBtn.addEventListener('click', async () => {
       ? t('savedAndRemembered', {
         status: t(successKey),
         domain: learningResult.domain,
-        category: learningResult.targetCategory
+        category: getFolderPathLabel(learningResult.targetFolderId)
       })
       : t(successKey);
     elements.pageLearningUndoBtn.classList.toggle('hidden', !learningResult);
@@ -1319,16 +1719,20 @@ async function undoPageLearning() {
   elements.pageLearningUndoBtn.disabled = true;
   const learningResult = pendingPageLearningUndo;
   try {
-    const revertedSettings = SmartFavClassifier.revertDomainLearning(
-      currentSettings,
-      learningResult
-    );
-    currentSettings = await updateStoredSettings({
-      keywordRules: revertedSettings.keywordRules
-    });
+    const entries = Object.entries(learningResult.previousFolderKeywords || {});
+    for (const [folderId, keywords] of entries) {
+      const response = await sendRuntimeMessage('updateFolder', {
+        folderId,
+        patch: { keywords }
+      });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message ? response.message : t('learningUndoFailed'));
+      }
+    }
+    await loadFolderState();
     pendingPageLearningUndo = null;
     elements.successMsg.textContent = t('learningUndone', {
-      category: learningResult.targetCategory
+      category: getFolderPathLabel(learningResult.targetFolderId)
     });
     elements.pageLearningUndoBtn.classList.add('hidden');
     schedulePopupClose(1800);
@@ -1341,44 +1745,78 @@ async function undoPageLearning() {
 
 elements.pageLearningUndoBtn.addEventListener('click', undoPageLearning);
 
-async function renderFolders() {
-  activeFavoriteCategory = null;
-  const result = await storageGet(['favorites', 'settings', 'favoriteOrder']);
+async function renderFolders(parentId = null) {
+  activeFavoriteCategory = parentId || null;
+  const result = await storageGet(['favorites', 'folders', 'favoriteOrder']);
   const favorites = Array.isArray(result.favorites) ? result.favorites : [];
-  const categories = result.settings && Array.isArray(result.settings.categories) && result.settings.categories.length
-    ? result.settings.categories
-    : currentSettings.categories;
+  if (Array.isArray(result.folders) && result.folders.length) {
+    currentFolders = SmartFavFolderTree.normalizeFolders(result.folders);
+  }
+  const folders = SmartFavFolderTree.childrenOf(currentFolders, parentId);
   activeFavoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
-  const counts = Object.fromEntries(categories.map((category) => [category, 0]));
-  favorites.forEach((favorite) => {
-    if (Object.prototype.hasOwnProperty.call(counts, favorite.category)) counts[favorite.category] += 1;
-  });
   elements.totalCount.textContent = t('favoritesCount', { count: favorites.length });
   const librarySummary = t('librarySummary', {
     favorites: favorites.length,
-    categories: categories.length
+    categories: currentFolders.length
   });
   elements.librarySummary.textContent = librarySummary;
   elements.favoritesViewSummary.textContent = librarySummary;
-  elements.categoryEntrySummary.textContent = t('categoryCount', { count: categories.length });
-  elements.recentSection.classList.remove('hidden');
+  elements.categoryEntrySummary.textContent = t('categoryCount', { count: currentFolders.length });
+  elements.recentSection.classList.toggle('hidden', Boolean(parentId));
   elements.foldersHeading.classList.remove('hidden');
   elements.foldersList.classList.remove('list-view');
-  elements.foldersList.innerHTML = categories.map((category) => `
+  elements.foldersList.innerHTML = `${parentId ? renderFolderBreadcrumb(parentId) : ''}${folders.map((folder) => `
     <button
       class="folder-item"
       type="button"
       draggable="true"
-      data-category="${escapeHtml(category)}"
+      data-folder-id="${escapeHtml(folder.id)}"
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
       title="${escapeHtml(t('dragFolderHint'))}"
     >
       <span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>
-      <span class="folder-name">${escapeHtml(category)}</span>
-      <span class="folder-count">${counts[category] || 0}</span>
+      <span class="folder-name">${escapeHtml(folder.name)}</span>
+      <span class="folder-count">${escapeHtml(t('folderItemCount', {
+    count: getDescendantFavoriteCount(folder.id, favorites)
+  }))}</span>
     </button>
-  `).join('');
-  bindFolderInteractions(categories, favorites);
+  `).join('') || (parentId
+    // 根层级留白交给 #favoritesEmptyState（带图标和引导按钮）；
+    // 子层级仍用这行内联文案，因为面包屑要留在列表里不能被整块隐藏。
+    ? `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`
+    : '')}`;
+  favoritesListParentId = parentId;
+  bindFolderInteractions(folders, favorites, parentId);
+  bindBreadcrumbActions(favorites, activeFavoriteOrder);
+  updateEmptyStates();
+}
+
+function getDescendantFavoriteCount(folderId, favorites) {
+  const ids = new Set([folderId, ...getFolderDescendantIds(folderId)]);
+  return favorites.filter((favorite) => ids.has(favorite.folderId)).length;
+}
+
+function renderFolderBreadcrumb(folderId) {
+  const path = SmartFavFolderTree.getPath(currentFolders, folderId);
+  return `
+    <nav class="folder-breadcrumb" aria-label="${escapeHtml(t('folderPath'))}">
+      <button type="button" data-folder-id="">${escapeHtml(t('favoriteCategories'))}</button>
+      ${path.map((folder) => `
+        <span aria-hidden="true">›</span>
+        <button type="button" data-folder-id="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</button>
+      `).join('')}
+    </nav>
+  `;
+}
+
+function bindBreadcrumbActions(favorites, favoriteOrder) {
+  elements.foldersList.querySelectorAll('.folder-breadcrumb button').forEach((button) => {
+    button.addEventListener('click', () => {
+      const folderId = button.dataset.folderId || null;
+      if (!folderId) renderFolders();
+      else showFavoritesByCategory(folderId, favorites, favoriteOrder);
+    });
+  });
 }
 
 function normalizeFavoriteOrderMap(value) {
@@ -1450,58 +1888,117 @@ async function finishFavoriteReorder(message, order) {
 }
 
 function clearReorderMarkers(container) {
-  container.querySelectorAll('.is-drop-before, .is-drop-after, .is-dragging')
+  container.querySelectorAll(`
+    .is-drop-before,
+    .is-drop-after,
+    .is-drop-top,
+    .is-drop-bottom,
+    .is-drop-left,
+    .is-drop-right,
+    .is-dragging
+  `)
     .forEach((item) => {
-      item.classList.remove('is-drop-before', 'is-drop-after', 'is-dragging');
+      item.classList.remove(
+        'is-drop-before',
+        'is-drop-after',
+        'is-drop-top',
+        'is-drop-bottom',
+        'is-drop-left',
+        'is-drop-right',
+        'is-dragging'
+      );
     });
 }
 
-function markReorderTarget(container, target, placement) {
-  container.querySelectorAll('.is-drop-before, .is-drop-after').forEach((item) => {
-    item.classList.remove('is-drop-before', 'is-drop-after');
+function markReorderTarget(container, target, placement, direction = '') {
+  container.querySelectorAll(`
+    .is-drop-before,
+    .is-drop-after,
+    .is-drop-top,
+    .is-drop-bottom,
+    .is-drop-left,
+    .is-drop-right
+  `).forEach((item) => {
+    item.classList.remove(
+      'is-drop-before',
+      'is-drop-after',
+      'is-drop-top',
+      'is-drop-bottom',
+      'is-drop-left',
+      'is-drop-right'
+    );
   });
   target.classList.add(placement === 'after' ? 'is-drop-after' : 'is-drop-before');
+  if (direction) target.classList.add(`is-drop-${direction}`);
 }
 
-function getDropPlacement(event, target, layout = 'vertical') {
+function getDropPlacement(event, target) {
   const rect = target.getBoundingClientRect();
-  const middleX = rect.left + rect.width / 2;
   const middleY = rect.top + rect.height / 2;
-  if (layout === 'grid' && Math.abs(event.clientY - middleY) < rect.height * 0.3) {
-    return event.clientX >= middleX ? 'after' : 'before';
-  }
   return event.clientY >= middleY ? 'after' : 'before';
+}
+
+function getGridDropDirection(event, target) {
+  const rect = target.getBoundingClientRect();
+  const relativeX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const relativeY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+  const distances = [
+    ['top', relativeY],
+    ['bottom', 1 - relativeY],
+    ['left', relativeX],
+    ['right', 1 - relativeX]
+  ];
+  distances.sort((a, b) => a[1] - b[1]);
+  return distances[0][0];
+}
+
+function getGridDropPlacement(direction) {
+  return direction === 'bottom' || direction === 'right' ? 'after' : 'before';
 }
 
 function focusReorderedItem(container, selector, dataKey, value) {
   const item = Array.from(container.querySelectorAll(selector))
     .find((candidate) => candidate.dataset[dataKey] === value);
-  if (item) item.focus();
+  if (!item) return;
+  item.focus();
+  item.classList.remove('motion-settled');
+  requestAnimationFrame(() => item.classList.add('motion-settled'));
+  item.addEventListener('animationend', () => {
+    item.classList.remove('motion-settled');
+  }, { once: true });
 }
 
-async function persistCategoryOrder(nextCategories, movedCategory) {
-  if (
-    !Array.isArray(nextCategories)
-    || nextCategories.join('\u0000') === currentSettings.categories.join('\u0000')
-  ) {
-    return;
-  }
-  currentSettings = {
-    ...currentSettings,
-    categories: nextCategories
-  };
-  currentSettings = await updateStoredSettings({ categories: nextCategories });
-  await renderFolders();
-  focusReorderedItem(elements.foldersList, '.folder-item', 'category', movedCategory);
-  const message = t('categoryOrderUpdated', {
-    category: movedCategory,
-    position: nextCategories.indexOf(movedCategory) + 1
+async function persistCategoryOrder(nextFolderIds, movedFolderId, parentId) {
+  if (!Array.isArray(nextFolderIds)) return;
+  const index = nextFolderIds.indexOf(movedFolderId);
+  if (index < 0) return;
+  const response = await sendRuntimeMessage('moveFolder', {
+    folderId: movedFolderId,
+    targetParentId: parentId,
+    index
   });
-  await finishFavoriteReorder(message, { categories: nextCategories });
+  if (!response || response.status !== 'ok') {
+    throw new Error(response && response.message ? response.message : t('browserBookmarkUnavailable'));
+  }
+  await loadFolderState();
+  if (parentId) {
+    const result = await storageGet(['favorites', 'favoriteOrder']);
+    showFavoritesByCategory(parentId, result.favorites || [], result.favoriteOrder);
+  } else {
+    await renderFolders();
+  }
+  focusReorderedItem(elements.foldersList, '.folder-item', 'folderId', movedFolderId);
+  const movedFolder = currentFolders.find((folder) => folder.id === movedFolderId);
+  const message = t('categoryOrderUpdated', {
+    category: movedFolder ? movedFolder.name : '',
+    position: index + 1
+  });
+  announceFavoriteReorder(message);
 }
 
-function bindFolderInteractions(categories, favorites) {
-  let draggedCategory = '';
+function bindFolderInteractions(folders, favorites, parentId = null) {
+  let draggedFolderId = '';
+  let dragPreviewKey = '';
   let suppressClick = false;
   const items = Array.from(elements.foldersList.querySelectorAll('.folder-item'));
 
@@ -1511,7 +2008,7 @@ function bindFolderInteractions(categories, favorites) {
         event.preventDefault();
         return;
       }
-      showFavoritesByCategory(item.dataset.category, favorites, activeFavoriteOrder);
+      showFavoritesByCategory(item.dataset.folderId, favorites, activeFavoriteOrder);
     });
 
     item.addEventListener('keydown', (event) => {
@@ -1520,47 +2017,70 @@ function bindFolderInteractions(categories, favorites) {
       }
       event.preventDefault();
       const offset = ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1;
-      const nextCategories = SmartFavOrder.moveValue(categories, item.dataset.category, offset);
-      persistCategoryOrder(nextCategories, item.dataset.category).catch(showFavoriteReorderError);
+      const ids = folders.map((folder) => folder.id);
+      const nextIds = SmartFavOrder.moveValue(ids, item.dataset.folderId, offset);
+      persistCategoryOrder(nextIds, item.dataset.folderId, parentId).catch(showFavoriteReorderError);
     });
 
     item.addEventListener('dragstart', (event) => {
-      draggedCategory = item.dataset.category;
+      draggedFolderId = item.dataset.folderId;
+      dragPreviewKey = '';
       suppressClick = true;
       event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('application/x-smartfav-category', draggedCategory);
-      event.dataTransfer.setData('text/plain', draggedCategory);
+      event.dataTransfer.setData('application/x-smartfav-folder', draggedFolderId);
+      event.dataTransfer.setData('text/plain', draggedFolderId);
       requestAnimationFrame(() => item.classList.add('is-dragging'));
     });
 
     item.addEventListener('dragover', (event) => {
-      if (!draggedCategory || draggedCategory === item.dataset.category) return;
+      if (!draggedFolderId || draggedFolderId === item.dataset.folderId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
+      const direction = getGridDropDirection(event, item);
+      const placement = getGridDropPlacement(direction);
+      const nextFolderIds = SmartFavOrder.reorderValues(
+        folders.map((folder) => folder.id),
+        draggedFolderId,
+        item.dataset.folderId,
+        placement
+      );
+      const previewPosition = nextFolderIds.indexOf(draggedFolderId) + 1;
       markReorderTarget(
         elements.foldersList,
         item,
-        getDropPlacement(event, item, 'grid')
+        placement,
+        direction
       );
+      const nextPreviewKey = `${item.dataset.folderId}:${direction}:${previewPosition}`;
+      if (nextPreviewKey !== dragPreviewKey) {
+        dragPreviewKey = nextPreviewKey;
+        const draggedFolder = folders.find((folder) => folder.id === draggedFolderId);
+        announceFavoriteReorder(t('folderDropPreview', {
+          category: draggedFolder ? draggedFolder.name : '',
+          position: previewPosition
+        }));
+      }
     });
 
     item.addEventListener('drop', (event) => {
-      if (!draggedCategory || draggedCategory === item.dataset.category) return;
+      if (!draggedFolderId || draggedFolderId === item.dataset.folderId) return;
       event.preventDefault();
-      const placement = getDropPlacement(event, item, 'grid');
-      const nextCategories = SmartFavOrder.reorderValues(
-        categories,
-        draggedCategory,
-        item.dataset.category,
+      const direction = getGridDropDirection(event, item);
+      const placement = getGridDropPlacement(direction);
+      const nextFolderIds = SmartFavOrder.reorderValues(
+        folders.map((folder) => folder.id),
+        draggedFolderId,
+        item.dataset.folderId,
         placement
       );
-      const movedCategory = draggedCategory;
+      const movedFolderId = draggedFolderId;
       clearReorderMarkers(elements.foldersList);
-      persistCategoryOrder(nextCategories, movedCategory).catch(showFavoriteReorderError);
+      persistCategoryOrder(nextFolderIds, movedFolderId, parentId).catch(showFavoriteReorderError);
     });
 
     item.addEventListener('dragend', () => {
-      draggedCategory = '';
+      draggedFolderId = '';
+      dragPreviewKey = '';
       clearReorderMarkers(elements.foldersList);
       setTimeout(() => { suppressClick = false; }, 0);
     });
@@ -1666,6 +2186,7 @@ async function renderRecentlyDeleted() {
     elements.trashStatus.textContent = t('trashOperationFailed', { message: error.message });
     elements.trashStatus.className = 'compact-settings-status error';
   }
+  updateEmptyStates();
 }
 
 async function restoreRecentlyDeleted(trashId) {
@@ -1726,29 +2247,53 @@ async function permanentlyDeleteRecentlyDeleted(trashId) {
   }
 }
 
-function showFavoritesByCategory(category, favorites, favoriteOrder = activeFavoriteOrder) {
-  activeFavoriteCategory = category;
+function showFavoritesByCategory(folderId, favorites, favoriteOrder = activeFavoriteOrder) {
+  activeFavoriteCategory = folderId;
   activeFavoriteOrder = normalizeFavoriteOrderMap(favoriteOrder);
   elements.recentSection.classList.add('hidden');
   elements.foldersHeading.classList.add('hidden');
-  renderFavoriteList(category, favorites, activeFavoriteOrder);
+  renderFavoriteList(folderId, favorites, activeFavoriteOrder);
 }
 
-function renderFavoriteList(title, favorites, favoriteOrder = activeFavoriteOrder) {
-  const orderedFavorites = SmartFavOrder.applyFavoriteOrder(
-    favorites,
-    title,
-    favoriteOrder[title]
-  );
+function applyFavoriteOrderById(favorites, folderId, orderedIds) {
+  const direct = favorites.filter((favorite) => favorite.folderId === folderId);
+  const byId = new Map(direct.map((favorite) => [favorite.id, favorite]));
+  const ordered = (Array.isArray(orderedIds) ? orderedIds : [])
+    .map((id) => byId.get(id))
+    .filter(Boolean);
+  const orderedSet = new Set(ordered.map((favorite) => favorite.id));
+  return [...direct.filter((favorite) => !orderedSet.has(favorite.id)), ...ordered];
+}
+
+function renderFavoriteList(folderId, favorites, favoriteOrder = activeFavoriteOrder) {
+  const folder = SmartFavFolderTree.getFolder(currentFolders, folderId);
+  if (!folder) {
+    renderFolders();
+    return;
+  }
+  const orderedFavorites = applyFavoriteOrderById(favorites, folderId, favoriteOrder[folderId]);
+  const childFolders = SmartFavFolderTree.childrenOf(currentFolders, folderId);
   elements.foldersList.classList.add('list-view');
   elements.foldersList.innerHTML = `
+    ${renderFolderBreadcrumb(folderId)}
     <div class="category-header">
       <button class="back-button" id="backToFolders" type="button">${escapeHtml(t('backToCategories'))}</button>
       <div class="category-heading">
-        <span class="category-title">${escapeHtml(title)}</span>
+        <span class="category-title">${escapeHtml(folder.name)}</span>
         <span class="category-count">${escapeHtml(t('favoritesCount', { count: orderedFavorites.length }))}</span>
       </div>
     </div>
+    ${childFolders.length ? `<div class="nested-folder-grid">
+      ${childFolders.map((child) => `
+        <button class="folder-item nested-folder-item" type="button" draggable="true" data-folder-id="${escapeHtml(child.id)}">
+          <span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>
+          <span class="folder-name">${escapeHtml(child.name)}</span>
+          <span class="folder-count">${escapeHtml(t('folderItemCount', {
+    count: getDescendantFavoriteCount(child.id, favorites)
+  }))}</span>
+        </button>
+      `).join('')}
+    </div>` : ''}
     <div class="favorite-list-rows">
       ${orderedFavorites.length
         ? orderedFavorites.map((favorite) => renderFavoriteRow(favorite, {
@@ -1758,15 +2303,24 @@ function renderFavoriteList(title, favorites, favoriteOrder = activeFavoriteOrde
         : `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`}
     </div>
   `;
-  document.getElementById('backToFolders').addEventListener('click', renderFolders);
+  document.getElementById('backToFolders').addEventListener('click', () => {
+    if (folder.parentId) showFavoritesByCategory(folder.parentId, favorites, favoriteOrder);
+    else renderFolders();
+  });
+  bindBreadcrumbActions(favorites, favoriteOrder);
+  bindFolderInteractions(childFolders, favorites, folderId);
   bindFavoriteActions(elements.foldersList);
-  bindFavoriteReordering(elements.foldersList, title);
+  bindFavoriteReordering(elements.foldersList, folderId);
 }
 
 function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } = {}) {
-  const image = favorite.favicon
+  // favicon 也要过协议白名单：data: 图片可以承载任意内容，且 escapeHtml 只处理属性逃逸。
+  const image = favorite.favicon && isSafeNavigableUrl(favorite.favicon)
     ? `<img src="${escapeHtml(favorite.favicon)}" class="favicon" alt="">`
     : '';
+  // 非网页协议的收藏（例如从书签栏导入的 bookmarklet 历史数据）降级为不可点击，
+  // 只展示文字，避免点击后触发导航。
+  const navigable = isSafeNavigableUrl(favorite.url);
   const title = favorite.title || t('untitledPage');
   const hostname = getHostname(favorite.url);
   const category = favorite.category || t('otherCategory');
@@ -1774,30 +2328,28 @@ function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } =
   const reorderAttributes = inFolder
     ? `
       draggable="true"
+      data-favorite-id="${escapeHtml(favorite.id || '')}"
       data-favorite-url="${escapeHtml(favorite.url)}"
-      data-category="${escapeHtml(category)}"
+      data-folder-id="${escapeHtml(favorite.folderId || '')}"
       title="${escapeHtml(t('dragFavoriteHint'))}"`
     : '';
   const keyboardAttributes = inFolder
     ? 'aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"'
     : '';
-  const targetCategories = (Array.isArray(currentSettings.categories)
-    ? currentSettings.categories
-    : [])
-    .filter((item) => item && item !== category);
-  const moveSelect = inFolder && targetCategories.length
+  const targetFolders = currentFolders.filter((item) => item.id !== favorite.folderId);
+  const moveSelect = inFolder && targetFolders.length
     ? `
       <select
         class="favorite-move-select"
         draggable="false"
-        data-url="${escapeHtml(favorite.url)}"
-        data-current-category="${escapeHtml(category)}"
+        data-favorite-id="${escapeHtml(favorite.id || '')}"
+        data-current-folder-id="${escapeHtml(favorite.folderId || '')}"
         aria-label="${escapeHtml(t('moveFavorite', { title }))}"
         title="${escapeHtml(t('moveFavorite', { title }))}"
       >
         <option value="" selected disabled>${escapeHtml(t('moveShort'))}</option>
-        ${targetCategories.map((targetCategory) => (
-          `<option value="${escapeHtml(targetCategory)}">${escapeHtml(targetCategory)}</option>`
+        ${targetFolders.map((targetFolder) => (
+          `<option value="${escapeHtml(targetFolder.id)}">${escapeHtml(getFolderPathLabel(targetFolder.id))}</option>`
         )).join('')}
       </select>`
     : '';
@@ -1806,6 +2358,7 @@ function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } =
       class="favorite-delete-button"
       type="button"
       draggable="false"
+      data-favorite-id="${escapeHtml(favorite.id || '')}"
       data-url="${escapeHtml(favorite.url)}"
       aria-label="${escapeHtml(t('deleteFavorite', { title }))}"
     >${escapeHtml(t('deleteShort'))}</button>
@@ -1816,7 +2369,8 @@ function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } =
       ${reorderAttributes}
     >
       ${inFolder ? '<span class="reorder-grip favorite-reorder-grip" aria-hidden="true"></span>' : ''}
-      <button
+      ${navigable
+        ? `<button
         class="recent-item favorite-link"
         type="button"
         data-url="${escapeHtml(favorite.url)}"
@@ -1828,7 +2382,16 @@ function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } =
           <span class="recent-title">${escapeHtml(title)}</span>
           <span class="recent-category">${escapeHtml(metadata)}</span>
         </span>
-      </button>
+      </button>`
+        : `<span
+        class="recent-item favorite-link favorite-link-blocked"
+        title="${escapeHtml(t('unsafeUrlBlocked'))}"
+      >
+        <span class="recent-info">
+          <span class="recent-title">${escapeHtml(title)}</span>
+          <span class="recent-category">${escapeHtml(t('unsafeUrlBlocked'))}</span>
+        </span>
+      </span>`}
       ${inFolder
         ? `<div class="favorite-row-actions${moveSelect ? '' : ' only-delete'}">${moveSelect}${deleteButton}</div>`
         : deleteButton}
@@ -1849,7 +2412,7 @@ function bindFavoriteActions(container) {
   container.querySelectorAll('.favorite-delete-button').forEach((button) => {
     button.addEventListener('click', async () => {
       button.disabled = true;
-      const deleted = await deleteFavorite(button.dataset.url);
+      const deleted = await deleteFavorite(button.dataset.favoriteId || button.dataset.url);
       if (!deleted) button.disabled = false;
     });
   });
@@ -1857,10 +2420,13 @@ function bindFavoriteActions(container) {
     select.addEventListener('pointerdown', (event) => event.stopPropagation());
     select.addEventListener('dragstart', (event) => event.preventDefault());
     select.addEventListener('change', async () => {
-      const targetCategory = select.value;
-      if (!targetCategory) return;
+      const targetFolderId = select.value;
+      if (!targetFolderId) return;
       select.disabled = true;
-      const moved = await moveFavoriteToCategory(select.dataset.url, targetCategory);
+      const moved = await moveFavoriteToCategory(
+        select.dataset.favoriteId,
+        targetFolderId
+      );
       if (!moved) {
         select.disabled = false;
         select.value = '';
@@ -1869,12 +2435,12 @@ function bindFavoriteActions(container) {
   });
 }
 
-async function moveFavoriteToCategory(url, targetCategory) {
+async function moveFavoriteToCategory(favoriteId, targetFolderId) {
   const categoryToKeep = activeFavoriteCategory;
   try {
-    const response = await sendRuntimeMessage('moveFavoriteToCategory', {
-      url,
-      targetCategory
+    const response = await sendRuntimeMessage('moveFavorite', {
+      favoriteId,
+      targetFolderId
     });
     if (!response || response.status !== 'ok') {
       throw new Error(
@@ -1886,7 +2452,8 @@ async function moveFavoriteToCategory(url, targetCategory) {
 
     const title = response.favorite && response.favorite.title
       ? response.favorite.title
-      : url;
+      : favoriteId;
+    const targetCategory = getFolderPathLabel(targetFolderId);
     let message = t('favoriteCategoryUpdated', {
       title,
       category: targetCategory
@@ -1926,8 +2493,8 @@ async function moveFavoriteToCategory(url, targetCategory) {
       await renderFolders();
     }
     showClassificationLearningPrompt(
-      response.favorite || { title, url },
-      targetCategory
+      response.favorite || { title, url: '' },
+      targetFolderId
     );
     return true;
   } catch (error) {
@@ -1951,12 +2518,57 @@ function hideClassificationLearningPrompt() {
   elements.classificationLearningDismissBtn.textContent = t('skipLearning');
 }
 
-function showClassificationLearningPrompt(favorite, targetCategory) {
-  const proposal = SmartFavClassifier.createDomainLearningProposal(
-    favorite,
-    targetCategory,
-    currentSettings
-  );
+function buildFolderDomainLearningProposal(favorite, targetFolderId) {
+  const target = SmartFavFolderTree.getFolder(currentFolders, targetFolderId);
+  let domain = '';
+  try {
+    domain = new URL(favorite && favorite.url ? favorite.url : '').hostname
+      .replace(/^www\./i, '')
+      .toLocaleLowerCase();
+  } catch (_error) {
+    return null;
+  }
+  if (!target || !domain) return null;
+  const keyword = `domain:${domain}`;
+  const previousFolders = currentFolders.filter((folder) => (
+    (folder.keywords || []).some((item) => String(item).toLocaleLowerCase() === keyword)
+  ));
+  if (previousFolders.length === 1 && previousFolders[0].id === target.id) return null;
+  return {
+    type: 'domain',
+    domain,
+    keyword,
+    targetFolderId: target.id,
+    targetCategory: getFolderPathLabel(target.id),
+    previousFolderIds: previousFolders
+      .filter((folder) => folder.id !== target.id)
+      .map((folder) => folder.id)
+  };
+}
+
+function createFolderLearningResult(proposal) {
+  const affectedIds = [...new Set([
+    proposal.targetFolderId,
+    ...(proposal.previousFolderIds || [])
+  ])];
+  const previousFolderKeywords = {};
+  const folderUpdates = {};
+  affectedIds.forEach((folderId) => {
+    const folder = SmartFavFolderTree.getFolder(currentFolders, folderId);
+    if (!folder) return;
+    previousFolderKeywords[folderId] = [...(folder.keywords || [])];
+    const filtered = (folder.keywords || []).filter((keyword) => (
+      String(keyword).toLocaleLowerCase() !== proposal.keyword
+    ));
+    folderUpdates[folderId] = folderId === proposal.targetFolderId
+      ? [...filtered, proposal.keyword]
+      : filtered;
+  });
+  return { ...proposal, previousFolderKeywords, folderUpdates };
+}
+
+function showClassificationLearningPrompt(favorite, targetFolderId) {
+  const proposal = buildFolderDomainLearningProposal(favorite, targetFolderId);
   if (!proposal) {
     hideClassificationLearningPrompt();
     return;
@@ -1968,9 +2580,9 @@ function showClassificationLearningPrompt(favorite, targetCategory) {
     domain: proposal.domain,
     category: proposal.targetCategory
   });
-  elements.classificationLearningHint.textContent = proposal.previousCategories.length
+  elements.classificationLearningHint.textContent = proposal.previousFolderIds.length
     ? t('rememberClassificationConflictHint', {
-      categories: proposal.previousCategories.join('、')
+      categories: proposal.previousFolderIds.map(getFolderPathLabel).join('、')
     })
     : t('rememberClassificationHint', { rule: proposal.keyword });
   elements.classificationLearningRememberBtn.hidden = false;
@@ -1984,10 +2596,18 @@ async function rememberClassificationLearning() {
   const proposal = pendingLearningProposal;
   elements.classificationLearningRememberBtn.disabled = true;
   try {
-    const learned = SmartFavClassifier.applyDomainLearning(currentSettings, proposal);
-    currentSettings = await updateStoredSettings({
-      keywordRules: learned.settings.keywordRules
-    });
+    const learned = createFolderLearningResult(proposal);
+    for (const [folderId, keywords] of Object.entries(learned.folderUpdates)) {
+      const response = await sendRuntimeMessage('updateFolder', {
+        folderId,
+        patch: { keywords }
+      });
+      if (!response || response.status !== 'ok') {
+        throw new Error(response && response.message ? response.message : t('learningSaveFailed'));
+      }
+    }
+    await loadFolderState();
+    pendingPageLearningUndo = learned;
     pendingLearningProposal = null;
     elements.classificationLearningPrompt.classList.remove('is-error');
     elements.classificationLearningPrompt.classList.add('is-saved');
@@ -2011,61 +2631,61 @@ async function rememberClassificationLearning() {
   }
 }
 
-async function saveFavoriteOrder(category, nextUrls, movedUrl, favorites, favoriteOrder) {
-  const currentUrls = SmartFavOrder.applyFavoriteOrder(
+async function saveFavoriteOrder(folderId, nextIds, movedId, favorites, favoriteOrder) {
+  const currentIds = applyFavoriteOrderById(
     favorites,
-    category,
-    favoriteOrder[category]
-  ).map((favorite) => favorite.url);
-  if (nextUrls.join('\u0000') === currentUrls.join('\u0000')) return;
+    folderId,
+    favoriteOrder[folderId]
+  ).map((favorite) => favorite.id);
+  if (nextIds.join('\u0000') === currentIds.join('\u0000')) return;
 
-  const nextFavoriteOrder = await updateStoredFavoriteOrder(category, nextUrls);
+  const nextFavoriteOrder = await updateStoredFavoriteOrder(folderId, nextIds);
   activeFavoriteOrder = nextFavoriteOrder;
-  showFavoritesByCategory(category, favorites, nextFavoriteOrder);
-  focusReorderedItem(elements.foldersList, '.favorite-link', 'url', movedUrl);
+  showFavoritesByCategory(folderId, favorites, nextFavoriteOrder);
+  focusReorderedItem(elements.foldersList, '.favorite-row', 'favoriteId', movedId);
 
-  const movedFavorite = favorites.find((favorite) => favorite.url === movedUrl);
+  const movedFavorite = favorites.find((favorite) => favorite.id === movedId);
   const message = t('favoriteOrderUpdated', {
-    title: movedFavorite && movedFavorite.title ? movedFavorite.title : movedUrl,
-    position: nextUrls.indexOf(movedUrl) + 1
+    title: movedFavorite && movedFavorite.title ? movedFavorite.title : movedId,
+    position: nextIds.indexOf(movedId) + 1
   });
   await finishFavoriteReorder(message, {
-    category,
-    orderedUrls: nextUrls
+    folderId,
+    orderedFavoriteIds: nextIds
   });
 }
 
-async function reorderFavorite(category, sourceUrl, targetUrl, placement) {
+async function reorderFavorite(folderId, sourceId, targetId, placement) {
   const result = await storageGet(['favorites', 'favoriteOrder']);
   const favorites = Array.isArray(result.favorites) ? result.favorites : [];
   const favoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
-  const nextUrls = SmartFavOrder.reorderFavoriteUrls(
-    favorites,
-    category,
-    favoriteOrder[category],
-    sourceUrl,
-    targetUrl,
+  const displayedIds = applyFavoriteOrderById(favorites, folderId, favoriteOrder[folderId])
+    .map((favorite) => favorite.id);
+  const nextIds = SmartFavOrder.reorderValues(
+    displayedIds,
+    sourceId,
+    targetId,
     placement
   );
-  await saveFavoriteOrder(category, nextUrls, sourceUrl, favorites, favoriteOrder);
+  await saveFavoriteOrder(folderId, nextIds, sourceId, favorites, favoriteOrder);
 }
 
-async function moveFavorite(category, sourceUrl, offset) {
+async function moveFavorite(folderId, sourceId, offset) {
   const result = await storageGet(['favorites', 'favoriteOrder']);
   const favorites = Array.isArray(result.favorites) ? result.favorites : [];
   const favoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
-  const nextUrls = SmartFavOrder.moveFavoriteUrl(
-    favorites,
-    category,
-    favoriteOrder[category],
-    sourceUrl,
+  const displayedIds = applyFavoriteOrderById(favorites, folderId, favoriteOrder[folderId])
+    .map((favorite) => favorite.id);
+  const nextIds = SmartFavOrder.moveValue(
+    displayedIds,
+    sourceId,
     offset
   );
-  await saveFavoriteOrder(category, nextUrls, sourceUrl, favorites, favoriteOrder);
+  await saveFavoriteOrder(folderId, nextIds, sourceId, favorites, favoriteOrder);
 }
 
-function bindFavoriteReordering(container, category) {
-  let draggedUrl = '';
+function bindFavoriteReordering(container, folderId) {
+  let draggedId = '';
   const rows = Array.from(container.querySelectorAll('.favorite-row-in-folder'));
 
   rows.forEach((row) => {
@@ -2076,7 +2696,7 @@ function bindFavoriteReordering(container, category) {
         event.preventDefault();
         event.stopPropagation();
         const offset = event.key === 'ArrowUp' ? -1 : 1;
-        moveFavorite(category, link.dataset.url, offset).catch(showFavoriteReorderError);
+        moveFavorite(folderId, row.dataset.favoriteId, offset).catch(showFavoriteReorderError);
       });
     }
 
@@ -2085,50 +2705,50 @@ function bindFavoriteReordering(container, category) {
         event.preventDefault();
         return;
       }
-      draggedUrl = row.dataset.favoriteUrl;
+      draggedId = row.dataset.favoriteId;
       favoriteOpenSuppressUntil = Date.now() + 1000;
       event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('application/x-smartfav-favorite', draggedUrl);
-      event.dataTransfer.setData('text/plain', draggedUrl);
+      event.dataTransfer.setData('application/x-smartfav-favorite', draggedId);
+      event.dataTransfer.setData('text/plain', draggedId);
       requestAnimationFrame(() => row.classList.add('is-dragging'));
     });
 
     row.addEventListener('dragover', (event) => {
-      if (!draggedUrl || draggedUrl === row.dataset.favoriteUrl) return;
+      if (!draggedId || draggedId === row.dataset.favoriteId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       markReorderTarget(container, row, getDropPlacement(event, row));
     });
 
     row.addEventListener('drop', (event) => {
-      if (!draggedUrl || draggedUrl === row.dataset.favoriteUrl) return;
+      if (!draggedId || draggedId === row.dataset.favoriteId) return;
       event.preventDefault();
       const placement = getDropPlacement(event, row);
-      const movedUrl = draggedUrl;
+      const movedId = draggedId;
       clearReorderMarkers(container);
       reorderFavorite(
-        category,
-        movedUrl,
-        row.dataset.favoriteUrl,
+        folderId,
+        movedId,
+        row.dataset.favoriteId,
         placement
       ).catch(showFavoriteReorderError);
     });
 
     row.addEventListener('dragend', () => {
-      draggedUrl = '';
+      draggedId = '';
       favoriteOpenSuppressUntil = Date.now() + 180;
       clearReorderMarkers(container);
     });
   });
 }
 
-async function deleteFavorite(url) {
-  if (!url) return false;
+async function deleteFavorite(identifier) {
+  if (!identifier) return false;
   const categoryToKeep = activeView === 'favorites' ? activeFavoriteCategory : null;
   try {
     if (isExtension) {
       const response = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'deleteFavorite', url }, (result) => {
+        chrome.runtime.sendMessage({ type: 'deleteFavorite', favoriteId: identifier }, (result) => {
           const runtimeError = chrome.runtime.lastError;
           resolve(runtimeError
             ? { status: 'error', message: runtimeError.message }
@@ -2146,10 +2766,13 @@ async function deleteFavorite(url) {
       const recentlyDeleted = Array.isArray(result.recentlyDeleted)
         ? result.recentlyDeleted
         : [];
-      const removedFavorites = favorites.filter((favorite) => favorite.url === url);
+      const removedFavorites = favorites.filter((favorite) => (
+        favorite.id === identifier || favorite.url === identifier
+      ));
+      const removedIds = new Set(removedFavorites.map((favorite) => favorite.id));
       const now = Date.now();
       await storageSet({
-        favorites: favorites.filter((favorite) => favorite.url !== url),
+        favorites: favorites.filter((favorite) => !removedIds.has(favorite.id)),
         recentlyDeleted: [
           ...removedFavorites.map((favorite, index) => ({
             ...favorite,
@@ -2157,7 +2780,7 @@ async function deleteFavorite(url) {
             deletedAt: now,
             expiresAt: now + TRASH_RETENTION_MS
           })),
-          ...recentlyDeleted.filter((item) => item.url !== url)
+          ...recentlyDeleted.filter((item) => !removedIds.has(item.id))
         ]
       });
     }
@@ -2179,6 +2802,11 @@ async function deleteFavorite(url) {
 
 function openUrl(url) {
   if (!url) return;
+  // 最后一道闸门：即使某条历史数据绕过了渲染层，也不允许导航到非网页协议。
+  if (!isSafeNavigableUrl(url)) {
+    showError(t('unsafeUrlBlocked'));
+    return;
+  }
   if (!isExtension) {
     window.open(url, '_blank', 'noopener');
     return;
@@ -2239,6 +2867,7 @@ elements.settingsBtn.addEventListener('click', () => {
 });
 
 async function showView(view) {
+  setCategorySelectOpen(false);
   activeView = ['home', 'favorites', 'categories', 'trash', 'settings'].includes(view)
     ? view
     : 'home';
@@ -2262,6 +2891,196 @@ async function showView(view) {
     populateCompactSettings();
   } else {
     applyAppearance();
+  }
+}
+
+function setSettingsGroupCollapsed(group, collapsed) {
+  if (!group) return;
+  group.classList.toggle('collapsed', collapsed);
+  group.querySelector('.settings-group-header')
+    ?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const body = group.querySelector('.settings-group-body');
+  if (!body) return;
+  body.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+  body.toggleAttribute('inert', collapsed);
+}
+
+// 设置页分组折叠：点击标题行切换 collapsed 状态，chevron 由 CSS 旋转。
+// inert + aria-hidden 确保收起后内部控件不会继续进入键盘或读屏顺序。
+function initSettingsGroupToggles() {
+  const headers = elements.settingsView.querySelectorAll('.settings-group-header');
+  headers.forEach((header) => {
+    const group = header.closest('.settings-group');
+    setSettingsGroupCollapsed(group, group?.classList.contains('collapsed'));
+    if (header.dataset.bound) return;
+    header.dataset.bound = 'true';
+    header.addEventListener('click', () => {
+      const group = header.closest('.settings-group');
+      if (!group) return;
+      setSettingsGroupCollapsed(group, !group.classList.contains('collapsed'));
+    });
+  });
+  // AI 启用时自动展开 AI 分组
+  const aiGroup = elements.settingsView.querySelector('[data-group="ai"]');
+  if (aiGroup && currentSettings.aiEnabled) {
+    setSettingsGroupCollapsed(aiGroup, false);
+  }
+  updateSettingsGroupSummaries();
+}
+
+function selectedOptionLabel(select) {
+  if (!select || !select.selectedOptions || !select.selectedOptions.length) return '';
+  return (select.selectedOptions[0].textContent || '').trim();
+}
+
+// 折叠态下也要能看出每组的当前状态，省得为了确认一个开关点开又收起。
+function updateSettingsGroupSummaries() {
+  if (!elements.settingsView) return;
+  const summaries = {
+    appearance: selectedOptionLabel(elements.compactThemeStyle),
+    ai: currentSettings.aiEnabled
+      ? selectedOptionLabel(elements.compactProvider)
+      : t('summaryDisabled'),
+    bookmarks: currentSettings.browserBookmarksEnabled
+      ? t('summaryEnabled')
+      : t('summaryDisabled'),
+    backup: hasRestorableBookmarkPoint(currentBookmarkRestorePoint)
+      ? t('summaryHasRestorePoint')
+      : t('summaryNoRestorePoint')
+  };
+  elements.settingsView.querySelectorAll('.settings-group-summary').forEach((node) => {
+    node.textContent = summaries[node.dataset.summary] || '';
+  });
+}
+
+// P2 搜索 + P3 空状态
+// 收藏和分类两个视图各持有一份搜索词与防抖计时器，互不干扰。
+const SEARCH_DEBOUNCE_MS = 150;
+
+const searchScopes = {
+  favorites: {
+    query: '',
+    timer: null,
+    input: () => elements.favoritesSearchInput,
+    clearBtn: () => elements.favoritesSearchClear,
+    // renderFolders 是异步的，且它自己会在写完 DOM 后调用 updateEmptyStates，
+    // 这里只需要等它完成。
+    refresh: async () => {
+      await renderFolders(favoritesListParentId);
+    }
+  },
+  categories: {
+    query: '',
+    timer: null,
+    input: () => elements.categoriesSearchInput,
+    clearBtn: () => elements.categoriesSearchClear,
+    refresh: () => {
+      renderCategoryRules();
+      updateEmptyStates();
+    }
+  }
+};
+
+function clearSearch(scope) {
+  const config = searchScopes[scope];
+  if (!config) return;
+  clearTimeout(config.timer);
+  config.query = '';
+  const input = config.input();
+  const clearBtn = config.clearBtn();
+  if (input) input.value = '';
+  if (clearBtn) clearBtn.classList.add('hidden');
+  config.refresh();
+}
+
+function bindSearchScope(scope) {
+  const config = searchScopes[scope];
+  if (!config) return;
+  const input = config.input();
+  const clearBtn = config.clearBtn();
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = 'true';
+    input.addEventListener('input', (event) => {
+      config.query = event.target.value.trim().toLowerCase();
+      if (clearBtn) clearBtn.classList.toggle('hidden', !config.query);
+      clearTimeout(config.timer);
+      config.timer = setTimeout(() => { config.refresh(); }, SEARCH_DEBOUNCE_MS);
+    });
+  }
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = 'true';
+    clearBtn.addEventListener('click', () => { clearSearch(scope); });
+  }
+}
+
+function bindClickOnce(element, handler) {
+  if (!element || element.dataset.bound) return;
+  element.dataset.bound = 'true';
+  element.addEventListener('click', handler);
+}
+
+function initSearchAndEmptyStates() {
+  bindSearchScope('favorites');
+  bindSearchScope('categories');
+  bindClickOnce(elements.favoritesEmptyAction, () => { showView('home'); });
+  bindClickOnce(elements.favoritesNoResultsAction, () => { clearSearch('favorites'); });
+  bindClickOnce(elements.categoriesNoResultsAction, () => { clearSearch('categories'); });
+}
+
+// 按搜索词隐藏不匹配的条目，返回仍然可见的条目数。
+// 判空必须用这个返回值而不是 children.length：全部过滤掉时节点还在 DOM 里，
+// 只是 display:none，用 children.length 会把"搜索无结果"误判成"有内容"。
+function applySearchFilter(container, itemSelector, query) {
+  if (!container) return { total: 0, visible: 0 };
+  const items = container.querySelectorAll(itemSelector);
+  let visible = 0;
+  items.forEach((item) => {
+    const searchableText = item.dataset.searchText || item.textContent || '';
+    const matched = !query || searchableText.toLowerCase().includes(query);
+    item.style.display = matched ? '' : 'none';
+    if (matched) visible += 1;
+  });
+  return { total: items.length, visible };
+}
+
+// "一条数据都没有"和"搜索没命中"是两种空，文案与操作不同，各用一个静态块。
+function toggleEmptyState(list, emptyEl, noResultsEl, counts, query) {
+  const isEmpty = counts.total === 0;
+  const isNoMatch = !isEmpty && counts.visible === 0 && Boolean(query);
+  if (emptyEl) emptyEl.classList.toggle('hidden', !isEmpty);
+  if (noResultsEl) noResultsEl.classList.toggle('hidden', !isNoMatch);
+  if (list) list.classList.toggle('hidden', isEmpty);
+}
+
+// 渲染后统一刷新三个视图的空状态。
+function updateEmptyStates() {
+  // 只有根层级的文件夹树才适用"还没有收藏"；子层级和"按分类看收藏"
+  // （list-view）都有自己的上下文，不能套用整站级别的空状态。
+  const favoritesQuery = searchScopes.favorites.query;
+  const inFolderTreeRoot = favoritesListParentId === null
+    && Boolean(elements.foldersList)
+    && !elements.foldersList.classList.contains('list-view');
+  const favoritesCounts = applySearchFilter(elements.foldersList, '.folder-item', favoritesQuery);
+  toggleEmptyState(
+    null,
+    elements.favoritesEmptyState,
+    elements.favoritesNoResults,
+    inFolderTreeRoot ? favoritesCounts : { total: 1, visible: 1 },
+    favoritesQuery
+  );
+
+  // 分类列表里还有面包屑节点，不能整块隐藏，所以 list 传 null。
+  const categoriesQuery = searchScopes.categories.query;
+  toggleEmptyState(
+    null,
+    elements.categoriesEmptyState,
+    elements.categoriesNoResults,
+    applySearchFilter(elements.categoryRulesList, '.category-rule-item', categoriesQuery),
+    categoriesQuery
+  );
+
+  if (elements.trashEmptyState && elements.trashList) {
+    elements.trashEmptyState.classList.toggle('hidden', elements.trashList.children.length > 0);
   }
 }
 
@@ -2306,6 +3125,7 @@ function populateCompactSettings() {
   updatePopupSizeLabels();
   updateBackgroundImagePreview();
   refreshBookmarkRestorePoints();
+  initSettingsGroupToggles();
 }
 
 function formatBookmarkRestoreTime(timestamp) {
@@ -2350,6 +3170,7 @@ function renderBookmarkRestorePointState(response) {
   const activePoint = response && response.activePoint;
   const latestPoint = activePoint || points[0] || null;
   currentBookmarkRestorePoint = latestPoint;
+  updateSettingsGroupSummaries();
   const hasRestorablePoint = hasRestorableBookmarkPoint(latestPoint);
   const legacyManagedCount = Number(latestPoint && latestPoint.legacyManagedCount) || 0;
 
@@ -2596,14 +3417,12 @@ async function importBookmarkRestorePoints() {
 }
 
 function populateCategoryManager() {
-  const mergedRules = SmartFavClassifier.mergeRules(
-    currentSettings.categories,
-    currentSettings.keywordRules,
-    currentSettings.language
-  );
-  categoryDraft = currentSettings.categories.map((category) => ({
-    name: category,
-    keywords: [...(mergedRules[category] || [])]
+  categoryDraft = SmartFavFolderTree.childrenOf(currentFolders, activeCategoryParentId).map((folder) => ({
+    id: folder.id,
+    parentId: folder.parentId,
+    name: folder.name,
+    path: getFolderPathLabel(folder.id),
+    keywords: [...(folder.keywords || [])]
   }));
   categoryKeywordSuggestionCounts = {};
   elements.compactNewCategory.value = '';
@@ -2956,7 +3775,7 @@ async function persistSettingsPatch(
     if (settingsSaveQueue === saveTask) currentSettings = savedSettings;
     if (applyAppearanceNow) applyAppearance();
     if (refreshSuggestion && currentTabInfo) {
-      currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+      currentSuggestion = classifyCurrentFolders(currentTabInfo);
       showCategorySuggestion(currentSuggestion);
     }
     showCompactSettingsStatus(t(statusKey), 'success');
@@ -3054,16 +3873,6 @@ async function handleBrowserBookmarkWriteChange() {
   });
 }
 
-function getClassificationDraftSettings() {
-  const categories = categoryDraft.map((item) => item.name);
-  return {
-    categories,
-    keywordRules: Object.fromEntries(
-      categoryDraft.map((item) => [item.name, [...item.keywords]])
-    )
-  };
-}
-
 async function handleBookmarkOrganizeChange() {
   const enabled = elements.compactBookmarkOrganizeEnabled.checked;
   const saved = await persistBookmarkSettings({
@@ -3110,7 +3919,16 @@ function updateCategoryKeywordsFromInput(input, { format = false } = {}) {
   showCategorySettingsStatus(t('keywordsNormalized'), 'success');
 }
 
+function updateCategoryNameFromInput(input) {
+  const index = Number(input.dataset.categoryIndex);
+  if (!Number.isInteger(index) || !categoryDraft[index]) return;
+  categoryDraft[index].name = input.value.trim();
+}
+
 function syncCategoryDraftFromInputs() {
+  elements.categoryRulesList
+    .querySelectorAll('.category-name-input')
+    .forEach((input) => updateCategoryNameFromInput(input));
   elements.categoryRulesList
     .querySelectorAll('.category-keywords-input')
     .forEach((input) => updateCategoryKeywordsFromInput(input));
@@ -3118,7 +3936,8 @@ function syncCategoryDraftFromInputs() {
 
 function buildAIKeywordPrompt(profiles) {
   const folders = profiles.map((profile) => ({
-    category: profile.category,
+    folderId: profile.category,
+    path: profile.name,
     existingKeywords: profile.existingKeywords,
     totalFavorites: profile.totalFavorites,
     favorites: profile.samples
@@ -3235,18 +4054,159 @@ async function analyzeCategoryKeywordsWithAI() {
   }
 }
 
+function buildAIOrganizationPrompt(profiles) {
+  return t('aiOrganizationPrompt', {
+    folders: JSON.stringify(profiles, null, 2)
+  });
+}
+
+function describeAIOrganizationOperation(operation) {
+  if (operation.type === 'move_favorite') {
+    return t('aiOrganizationMoveFavorite', {
+      title: operation.favoriteTitle || operation.favoriteId,
+      category: getFolderPathLabel(operation.targetFolderId) || operation.targetFolderId
+    });
+  }
+  if (operation.type === 'create_folder') {
+    const parent = operation.parentId
+      ? getFolderPathLabel(operation.parentId) || operation.parentId
+      : t('favoriteCategories');
+    return t('aiOrganizationCreateFolder', { path: `${parent} › ${operation.name}` });
+  }
+  return t('aiOrganizationAddKeywords', {
+    category: getFolderPathLabel(operation.folderId) || operation.folderId,
+    keywords: (operation.keywords || []).join(', ')
+  });
+}
+
+function renderAIOrganizationPreview(response) {
+  activeAIOrganizationProposal = response;
+  elements.aiOrganizationPreview.classList.remove('hidden');
+  elements.aiOrganizationPreviewSummary.textContent = t('aiOrganizationPreviewSummary', {
+    count: response.operations.length,
+    rejected: (response.rejected || []).length
+  });
+  elements.aiOrganizationOperations.innerHTML = response.operations.map((operation) => `
+    <label class="ai-organization-operation">
+      <input type="checkbox" value="${escapeHtml(operation.id)}" checked>
+      <span>
+        <strong>${escapeHtml(describeAIOrganizationOperation(operation))}</strong>
+        ${operation.reason ? `<small>${escapeHtml(operation.reason)}</small>` : ''}
+      </span>
+    </label>
+  `).join('');
+}
+
+async function analyzeAIOrganization() {
+  if (!currentSettings.aiEnabled) {
+    showCategorySettingsStatus(t('aiKeywordNeedsEnabled'), 'error');
+    return;
+  }
+  const provider = SmartFavAI.getProvider(currentSettings.apiProvider);
+  if (provider.requiresKey && !String(currentSettings.apiKey || '').trim()) {
+    showCategorySettingsStatus(t('apiKeyRequired'), 'error');
+    return;
+  }
+  const result = await storageGet(['favorites']);
+  const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+  const profiles = SmartFavAIOrganization.buildProfiles(
+    currentFolders,
+    favorites,
+    SmartFavFolderTree,
+    12
+  );
+  if (!profiles.some((profile) => profile.favorites.length)) {
+    showCategorySettingsStatus(t('aiKeywordNoFavorites'), 'error');
+    return;
+  }
+  elements.aiOrganizationAnalyzeBtn.disabled = true;
+  elements.aiOrganizationAnalyzeBtn.textContent = t('optimizing');
+  try {
+    const rawResponse = await SmartFavAI.call(buildAIOrganizationPrompt(profiles), currentSettings);
+    const rawOperations = SmartFavAIOrganization.parseOperations(rawResponse);
+    const response = await sendRuntimeMessage('previewAIOrganization', { operations: rawOperations });
+    if (!response || !['ok', 'partial'].includes(response.status) || !response.operations.length) {
+      throw new Error(t('aiOrganizationNoSuggestions'));
+    }
+    renderAIOrganizationPreview(response);
+    showCategorySettingsStatus(t('aiOrganizationReady'), 'success');
+  } catch (error) {
+    activeAIOrganizationProposal = null;
+    elements.aiOrganizationPreview.classList.add('hidden');
+    showCategorySettingsStatus(t('aiOrganizationFailed', { message: error.message }), 'error');
+  } finally {
+    elements.aiOrganizationAnalyzeBtn.disabled = false;
+    elements.aiOrganizationAnalyzeBtn.textContent = t('aiOrganizationAnalyze');
+  }
+}
+
+async function applyAIOrganizationSelection() {
+  if (!activeAIOrganizationProposal) return;
+  const operationIds = [...elements.aiOrganizationOperations.querySelectorAll('input:checked')]
+    .map((input) => input.value);
+  if (!operationIds.length) {
+    showCategorySettingsStatus(t('aiOrganizationChooseOne'), 'error');
+    return;
+  }
+  elements.aiOrganizationApplyBtn.disabled = true;
+  try {
+    const response = await sendRuntimeMessage('applyAIOrganization', {
+      proposalId: activeAIOrganizationProposal.proposalId,
+      operationIds
+    });
+    // 'partial' 表示本地已写入、但浏览器书签侧没有完全同步：
+    // 不能当失败回滚（本地已经变了），也不能当完全成功，需要单独提示。
+    if (!response || !['ok', 'partial'].includes(response.status)) {
+      throw new Error(describeFolderError(response, 'aiOrganizationApplyFailed'));
+    }
+    activeAIOrganizationProposal = null;
+    elements.aiOrganizationPreview.classList.add('hidden');
+    await loadFolderState();
+    populateCategoryManager();
+    await Promise.all([renderFolders(), renderRecentFavorites()]);
+    const appliedSummary = t('aiOrganizationApplied', {
+      count: Number(response.applied) || 0,
+      folders: Number(response.createdFolders) || 0,
+      moved: Number(response.movedFavorites) || 0
+    });
+    if (response.status === 'partial') {
+      showCategorySettingsStatus(`${appliedSummary} · ${t('partialApplySummary')}`, 'error');
+    } else {
+      showCategorySettingsStatus(appliedSummary, 'success');
+    }
+  } catch (error) {
+    showCategorySettingsStatus(t('aiOrganizationApplyFailed', { message: error.message }), 'error');
+  } finally {
+    elements.aiOrganizationApplyBtn.disabled = false;
+  }
+}
+
 function renderCategoryRules() {
-  elements.categoryRulesList.innerHTML = categoryDraft.map((item, index) => {
-    const suggestionCount = Number(categoryKeywordSuggestionCounts[item.name]) || 0;
+  const breadcrumb = activeCategoryParentId
+    ? renderCategoryManagerBreadcrumb(activeCategoryParentId)
+    : '';
+  elements.categoryRulesList.innerHTML = breadcrumb + categoryDraft.map((item, index) => {
+    const suggestionCount = Number(categoryKeywordSuggestionCounts[item.id]) || 0;
+    const blockedTargets = new Set([item.id, ...getFolderDescendantIds(item.id)]);
+    const parentOptions = currentFolders.filter((folder) => !blockedTargets.has(folder.id));
+    const deleteDefault = item.parentId
+      || (SmartFavFolderTree.getFallbackFolder(currentFolders, currentSettings.language) || {}).id
+      || '';
     return `
-    <div class="category-rule-item${suggestionCount ? ' has-ai-suggestions' : ''}" data-category-index="${index}">
+    <div
+      class="category-rule-item${suggestionCount ? ' has-ai-suggestions' : ''}"
+      data-category-index="${index}"
+      data-folder-id="${escapeHtml(item.id)}"
+      data-search-text="${escapeHtml([item.path, item.name, ...(item.keywords || [])].join(' ').toLowerCase())}"
+    >
       <div class="category-rule-header">
-        <span class="category-rule-title">
-          <span class="category-rule-name">${escapeHtml(item.name)}</span>
+        <span class="category-rule-title category-rule-name-field">
+          <input class="category-name-input" data-category-index="${index}" value="${escapeHtml(item.name)}" aria-label="${escapeHtml(t('folderName'))}">
           ${suggestionCount
     ? `<span class="category-rule-ai-badge">AI +${suggestionCount}</span>`
     : ''}
         </span>
+        <button class="category-enter-button" type="button" data-folder-id="${escapeHtml(item.id)}">${escapeHtml(t('openFolder'))}</button>
         <button
           class="category-remove-button"
           type="button"
@@ -3266,53 +4226,123 @@ function renderCategoryRules() {
           placeholder="${escapeHtml(t('keywordsPlaceholder'))}"
         >${escapeHtml(formatKeywords(item.keywords))}</textarea>
       </label>
+      <div class="category-folder-actions">
+        <label>
+          <span>${escapeHtml(t('moveFolderTo'))}</span>
+          <select class="category-parent-select" data-folder-id="${escapeHtml(item.id)}">
+            <option value="">${escapeHtml(t('favoriteCategories'))}</option>
+            ${parentOptions.map((folder) => `
+              <option value="${escapeHtml(folder.id)}"${folder.id === item.parentId ? ' selected' : ''}>${escapeHtml(getFolderPathLabel(folder.id))}</option>
+            `).join('')}
+          </select>
+        </label>
+        <label>
+          <span>${escapeHtml(t('deleteMoveTo'))}</span>
+          <select class="category-delete-target" data-folder-id="${escapeHtml(item.id)}">
+            <option value="">${escapeHtml(t('chooseFolder'))}</option>
+            ${parentOptions.map((folder) => `
+              <option value="${escapeHtml(folder.id)}"${folder.id === deleteDefault ? ' selected' : ''}>${escapeHtml(getFolderPathLabel(folder.id))}</option>
+            `).join('')}
+          </select>
+        </label>
+      </div>
     </div>
   `;
   }).join('');
+  updateEmptyStates();
 }
 
-function addCategoryFolder() {
+function renderCategoryManagerBreadcrumb(folderId) {
+  const path = SmartFavFolderTree.getPath(currentFolders, folderId);
+  return `
+    <nav class="folder-breadcrumb category-manager-breadcrumb" aria-label="${escapeHtml(t('folderPath'))}">
+      <button type="button" data-category-parent-id="">${escapeHtml(t('favoriteCategories'))}</button>
+      ${path.map((folder) => `
+        <span aria-hidden="true">›</span>
+        <button type="button" data-category-parent-id="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</button>
+      `).join('')}
+    </nav>
+  `;
+}
+
+async function addCategoryFolder() {
   const name = elements.compactNewCategory.value.trim();
   if (!name) {
     elements.compactNewCategory.focus();
     return;
   }
-  const normalizedName = normalizeCategoryName(name);
-  if (categoryDraft.some((item) => normalizeCategoryName(item.name) === normalizedName)) {
-    showCategorySettingsStatus(t('duplicateCategory'), 'error');
+  const response = await sendRuntimeMessage('createFolder', {
+    folder: { parentId: activeCategoryParentId, name, keywords: [], source: 'user' }
+  });
+  if (!response || response.status !== 'ok') {
+    showCategorySettingsStatus(
+      describeFolderError(response, 'duplicateCategory', { conflict: 'duplicateCategory' }),
+      'error'
+    );
     return;
   }
-  categoryDraft.push({ name, keywords: [] });
+  await loadFolderState();
   elements.compactNewCategory.value = '';
-  renderCategoryRules();
+  populateCategoryManager();
   showCategorySettingsStatus(t('categoryAdded'), 'success');
-  const newRuleInput = elements.categoryRulesList.querySelector(
-    `.category-keywords-input[data-category-index="${categoryDraft.length - 1}"]`
-  );
+  const newRuleInput = elements.categoryRulesList.querySelector(`[data-folder-id="${response.folder.id}"] .category-keywords-input`);
   if (newRuleInput) newRuleInput.focus();
 }
 
-function removeCategoryFolder(index) {
-  if (categoryDraft.length <= 1) {
-    showCategorySettingsStatus(t('cannotRemoveLastCategory'), 'error');
+// 后端 folder 相关接口统一返回 { status, message }，其中 message 是英文调试文案。
+// 这里按 status 分派到 i18n 文案，避免把内部英文直接透给用户；
+// overrides 允许调用点针对具体操作给出更贴切的措辞。
+function describeFolderError(response, fallbackKey, overrides = {}) {
+  const status = response && response.status ? response.status : 'error';
+  if (overrides[status]) return t(overrides[status]);
+  if (status === 'conflict') return t('folderNameConflict');
+  if (status === 'invalid') return t('folderInvalidInput');
+  return t(fallbackKey || 'folderOperationFailed');
+}
+
+async function removeCategoryFolder(index, targetFolderId) {
+  const item = categoryDraft[index];
+  if (!item) return;
+  // 非空文件夹（有子文件夹或直接收藏）必须先指定迁移目标，
+  // 否则后端只会回一个英文 invalid，用户看不懂也不知道该改哪里。
+  const hasChildren = currentFolders.some((folder) => folder.parentId === item.id);
+  if (!targetFolderId && hasChildren) {
+    showCategorySettingsStatus(t('migrationTargetRequired'), 'error');
     return;
   }
-  const [removed] = categoryDraft.splice(index, 1);
-  if (removed) delete categoryKeywordSuggestionCounts[removed.name];
-  renderCategoryRules();
+  // 删除文件夹会连带迁移其下全部收藏，属于不易撤销的操作，加一道二次确认。
+  if (!window.confirm(t('confirmDeleteFolder', { name: item.name }))) return;
+  const response = await sendRuntimeMessage('deleteFolder', {
+    folderId: item.id,
+    targetFolderId
+  });
+  if (!response || response.status !== 'ok') {
+    showCategorySettingsStatus(
+      describeFolderError(response, 'categoryRemoveFailed', {
+        invalid: 'migrationTargetRequired',
+        conflict: 'folderInvalidInput'
+      }),
+      'error'
+    );
+    return;
+  }
+  delete categoryKeywordSuggestionCounts[item.id];
+  await loadFolderState();
+  populateCategoryManager();
   showCategorySettingsStatus(t('categoryRemoved'), 'success');
 }
 
 function reclassifyFavoriteRecord(favorite, settings) {
-  const suggestion = SmartFavClassifier.classify({
+  const suggestion = SmartFavClassifier.classifyFolders({
     title: favorite.title || favorite.url,
     url: favorite.url,
     description: favorite.description || '',
     keywords: favorite.keywords || []
-  }, settings);
+  }, settings, currentFolders);
   return {
     ...favorite,
     category: suggestion.category,
+    folderId: suggestion.folderId,
     tags: suggestion.tags,
     summary: suggestion.summary,
     classificationSource: 'local',
@@ -3321,7 +4351,8 @@ function reclassifyFavoriteRecord(favorite, settings) {
 }
 
 function classificationChanged(previous, next) {
-  return previous.category !== next.category
+  return previous.folderId !== next.folderId
+    || previous.category !== next.category
     || JSON.stringify(previous.tags || []) !== JSON.stringify(next.tags || [])
     || previous.summary !== next.summary
     || previous.classificationSource !== next.classificationSource;
@@ -3397,46 +4428,85 @@ elements.categoryKeywordAiAnalyzeBtn.addEventListener(
   'click',
   analyzeCategoryKeywordsWithAI
 );
+elements.aiOrganizationAnalyzeBtn.addEventListener('click', analyzeAIOrganization);
+elements.aiOrganizationApplyBtn.addEventListener('click', applyAIOrganizationSelection);
 elements.compactNewCategory.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   addCategoryFolder();
 });
 elements.categoryRulesList.addEventListener('input', (event) => {
-  if (!event.target.classList.contains('category-keywords-input')) return;
-  updateCategoryKeywordsFromInput(event.target);
+  if (event.target.classList.contains('category-keywords-input')) {
+    updateCategoryKeywordsFromInput(event.target);
+  } else if (event.target.classList.contains('category-name-input')) {
+    updateCategoryNameFromInput(event.target);
+  }
 });
 elements.categoryRulesList.addEventListener('focusout', (event) => {
   if (!event.target.classList.contains('category-keywords-input')) return;
   updateCategoryKeywordsFromInput(event.target, { format: true });
 });
 elements.categoryRulesList.addEventListener('click', (event) => {
+  const breadcrumbButton = event.target.closest('[data-category-parent-id]');
+  if (breadcrumbButton) {
+    activeCategoryParentId = breadcrumbButton.dataset.categoryParentId || null;
+    populateCategoryManager();
+    return;
+  }
+  const enterButton = event.target.closest('.category-enter-button');
+  if (enterButton) {
+    activeCategoryParentId = enterButton.dataset.folderId || null;
+    populateCategoryManager();
+    return;
+  }
   const removeButton = event.target.closest('.category-remove-button');
   if (!removeButton) return;
   const index = Number(removeButton.dataset.categoryIndex);
   if (!Number.isInteger(index) || !categoryDraft[index]) return;
-  removeCategoryFolder(index);
+  const row = removeButton.closest('.category-rule-item');
+  const targetFolderId = row && row.querySelector('.category-delete-target')
+    ? row.querySelector('.category-delete-target').value
+    : '';
+  removeCategoryFolder(index, targetFolderId);
+});
+
+elements.categoryRulesList.addEventListener('change', async (event) => {
+  if (!event.target.classList.contains('category-parent-select')) return;
+  const folderId = event.target.dataset.folderId;
+  const targetParentId = event.target.value || null;
+  const previousParentId = SmartFavFolderTree.getFolder(currentFolders, folderId)?.parentId || null;
+  if (previousParentId === targetParentId) return;
+  const response = await sendRuntimeMessage('moveFolder', { folderId, targetParentId });
+  if (!response || response.status !== 'ok') {
+    event.target.value = previousParentId || '';
+    showCategorySettingsStatus(describeFolderError(response, 'categoryMoveFailed'), 'error');
+    return;
+  }
+  await loadFolderState();
+  populateCategoryManager();
+  showCategorySettingsStatus(t('categoryMoved'), 'success');
 });
 
 elements.categorySaveBtn.addEventListener('click', async () => {
-  const classificationSettings = getClassificationDraftSettings();
-  if (!classificationSettings.categories.length) {
-    showCategorySettingsStatus(t('keepOneCategory'), 'error');
-    return;
-  }
-
+  syncCategoryDraftFromInputs();
   elements.categorySaveBtn.disabled = true;
   elements.categorySaveBtn.textContent = t('reclassifying');
   try {
-    currentSettings = {
-      ...currentSettings,
-      ...classificationSettings
-    };
-    currentSettings = await updateStoredSettings(classificationSettings);
+    for (const item of categoryDraft) {
+      if (!item.name) throw new Error(t('folderNameRequired'));
+      const response = await sendRuntimeMessage('updateFolder', {
+        folderId: item.id,
+        patch: { name: item.name, keywords: item.keywords }
+      });
+      if (!response || response.status !== 'ok') {
+        throw new Error(describeFolderError(response, 'categorySaveFailed'));
+      }
+    }
+    await loadFolderState();
     const result = await reclassifyStoredFavorites();
     await Promise.all([renderFolders(), renderRecentFavorites()]);
     if (currentTabInfo) {
-      currentSuggestion = SmartFavClassifier.classify(currentTabInfo, currentSettings);
+      currentSuggestion = classifyCurrentFolders(currentTabInfo);
       showCategorySuggestion(currentSuggestion);
     }
     categoryKeywordSuggestionCounts = {};

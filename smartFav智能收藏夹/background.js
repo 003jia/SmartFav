@@ -1,9 +1,12 @@
 // SmartFav Background - 生命周期、浏览器事件与消息传输层
 importScripts(
   'constants.js',
+  'folder-tree.js',
   'state-store.js',
   'bookmark-guard.js',
+  'bookmark-events.js',
   'classifier.js',
+  'ai-organization.js',
   'browser-bookmarks.js',
   'bookmark-backup.js',
   'order-utils.js',
@@ -13,12 +16,12 @@ importScripts(
 
 const { setStoredStateChecked } = SmartFavStateStore;
 const bookmarkGuard = SmartFavBookmarkGuard.createBookmarkGuard({ chrome });
-const { enqueueBookmarkEvent, withBookmarkLayoutLock } = bookmarkGuard;
 const favoritesService = SmartFavFavoritesService.createFavoritesService({
   chrome, stateStore: SmartFavStateStore, bookmarkGuard,
   classifier: SmartFavClassifier, bookmarks: SmartFavBookmarks,
   backup: SmartFavBackup, order: SmartFavOrder, i18n: SmartFavI18n,
-  constants: SmartFavConstants
+  constants: SmartFavConstants, folderTree: SmartFavFolderTree,
+  aiOrganization: SmartFavAIOrganization
 });
 const TRASH_CLEANUP_ALARM = 'smartfav-trash-cleanup';
 
@@ -89,47 +92,31 @@ chrome.runtime.onInstalled.addListener((details) => {
     ? 'zh_CN'
     : 'en';
   setStoredStateChecked({
+    folderSchemaVersion: SmartFavFolderTree.SCHEMA_VERSION,
+    folderMigrationBackup: null,
+    folders: [],
     settings: createDefaultSettings(language),
     favorites: [],
     favoriteOrder: {},
     recentlyDeleted: [],
     bookmarkRestorePoints: [],
+    aiOrganizationPreviews: [],
     pendingBrowserActivity: null
   })
     .then(() => console.log('SmartFav 已安装'))
     .catch((error) => console.error('SmartFav initialization failed:', error));
 });
 
-chrome.bookmarks.onCreated.addListener((id, node) => {
-  enqueueBookmarkEvent(
-    'auto capture',
-    () => withBookmarkLayoutLock(() => favoritesService.handleBookmarkCreated(id, node))
-  );
-});
-
-if (chrome.bookmarks.onMoved && typeof chrome.bookmarks.onMoved.addListener === 'function') {
-  chrome.bookmarks.onMoved.addListener((id, moveInfo) => {
-    enqueueBookmarkEvent(
-      'browser move sync',
-      () => withBookmarkLayoutLock(() => favoritesService.handleBookmarkMoved(id, moveInfo))
-    );
-  });
-}
-
-if (chrome.bookmarks.onRemoved && typeof chrome.bookmarks.onRemoved.addListener === 'function') {
-  chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
-    enqueueBookmarkEvent(
-      'browser deletion sync',
-      () => withBookmarkLayoutLock(() => favoritesService.handleBookmarkRemoved(id, removeInfo))
-    );
-  });
-}
+SmartFavBookmarkEvents.attach({ chrome, favoritesService, bookmarkGuard });
 
 if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 'function') {
   chrome.runtime.onStartup.addListener(() => {
     scheduleTrashCleanup();
     favoritesService.cleanupRecentlyDeleted().catch((error) => {
       console.error('SmartFav trash cleanup failed:', error);
+    });
+    favoritesService.recoverManagedFavorites().catch((error) => {
+      console.error('SmartFav startup bookmark reconciliation failed:', error);
     });
   });
 }
@@ -171,7 +158,9 @@ const MESSAGE_ROUTES = Object.freeze({
       }
     }
   },
-  deleteFavorite: { handle: (message) => favoritesService.deleteFavorite(message.url) },
+  deleteFavorite: {
+    handle: (message) => favoritesService.deleteFavorite(message.favoriteId || message.url)
+  },
   getRecentlyDeleted: { handle: () => favoritesService.getRecentlyDeleted() },
   restoreDeletedFavorite: {
     handle: (message) => favoritesService.restoreDeletedFavorite(message.trashId)
@@ -192,9 +181,38 @@ const MESSAGE_ROUTES = Object.freeze({
   updateSettings: {
     handle: (message) => favoritesService.updateSettings(message.patch)
   },
+  getFolderTree: { handle: () => favoritesService.getFolderTree() },
+  createFolder: { handle: (message) => favoritesService.createFolder(message.folder) },
+  updateFolder: {
+    handle: (message) => favoritesService.updateFolder(message.folderId, message.patch)
+  },
+  moveFolder: {
+    handle: (message) => (
+      favoritesService.moveFolder(message.folderId, message.targetParentId, message.index)
+    )
+  },
+  deleteFolder: {
+    handle: (message) => favoritesService.deleteFolder(message.folderId, message.targetFolderId)
+  },
+  moveFavorite: {
+    handle: (message) => (
+      favoritesService.moveFavorite(message.favoriteId, message.targetFolderId, message.index)
+    )
+  },
+  previewAIOrganization: {
+    handle: (message) => favoritesService.previewAIOrganization(message.operations)
+  },
+  applyAIOrganization: {
+    handle: (message) => (
+      favoritesService.applyAIOrganization(message.proposalId, message.operationIds)
+    )
+  },
   updateFavoriteOrder: {
     handle: (message) => (
-      favoritesService.updateFavoriteOrder(message.category, message.orderedUrls)
+      favoritesService.updateFavoriteOrder(
+        message.folderId || message.category,
+        message.orderedFavoriteIds || message.orderedUrls
+      )
     )
   },
   consumePendingBrowserActivity: {

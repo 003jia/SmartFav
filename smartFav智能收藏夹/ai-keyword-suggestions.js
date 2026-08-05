@@ -112,15 +112,18 @@
     const favoriteList = Array.isArray(favorites) ? favorites : [];
     return (Array.isArray(categoryDraft) ? categoryDraft : [])
       .map((item) => {
-        const category = clipText(item && item.name, 64);
+        const category = clipText(item && (item.id || item.name), 128);
         if (!category) return null;
         const categoryFavorites = favoriteList.filter(
-          (favorite) => favorite && String(favorite.category || '') === category
+          (favorite) => favorite && (item.id
+            ? String(favorite.folderId || '') === String(item.id)
+            : String(favorite.category || '') === String(item.name || ''))
         );
         const samples = pickRepresentativeSamples(categoryFavorites, safeSampleLimit);
         if (!samples.length) return null;
         return {
           category,
+          name: clipText(item && (item.path || item.name), 160),
           existingKeywords: splitExistingKeywords(item.keywords)
             .slice(0, Math.max(0, Number(existingKeywordLimit) || 0)),
           totalFavorites: categoryFavorites.length,
@@ -239,7 +242,7 @@
     const draft = (Array.isArray(categoryDraft) ? categoryDraft : []).map((item) => {
       const existingKeywords = Array.isArray(item.keywords) ? [...item.keywords] : [];
       const existing = new Set(existingKeywords.map(normalize).filter(Boolean));
-      const suggestion = suggestionMap.get(normalize(item.name));
+      const suggestion = suggestionMap.get(normalize(item.id || item.name));
       const added = [];
       (suggestion && Array.isArray(suggestion.keywords) ? suggestion.keywords : [])
         .forEach((keyword) => {
@@ -250,7 +253,7 @@
           added.push(keyword);
         });
       if (added.length) {
-        addedByCategory[item.name] = added.length;
+        addedByCategory[item.id || item.name] = added.length;
         addedCount += added.length;
       }
       return {

@@ -17,6 +17,7 @@ const optionsHtml = fs.readFileSync(path.join(extensionRoot, 'options.html'), 'u
 const popupJs = fs.readFileSync(path.join(extensionRoot, 'popup.js'), 'utf8');
 const popupCss = fs.readFileSync(path.join(extensionRoot, 'styles/popup.css'), 'utf8');
 const backgroundJs = fs.readFileSync(path.join(extensionRoot, 'background.js'), 'utf8');
+const bookmarkEventsJs = fs.readFileSync(path.join(extensionRoot, 'bookmark-events.js'), 'utf8');
 const aiClientJs = fs.readFileSync(path.join(extensionRoot, 'ai-client.js'), 'utf8');
 const favoritesServiceJs = fs.readFileSync(
   path.join(extensionRoot, 'favorites-service.js'),
@@ -24,6 +25,8 @@ const favoritesServiceJs = fs.readFileSync(
 );
 
 const classifier = require(path.join(extensionRoot, 'classifier.js'));
+const folderTree = require(path.join(extensionRoot, 'folder-tree.js'));
+const aiOrganization = require(path.join(extensionRoot, 'ai-organization.js'));
 const i18n = require(path.join(extensionRoot, 'i18n.js'));
 const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'));
 const bookmarkBackup = require(path.join(extensionRoot, 'bookmark-backup.js'));
@@ -47,6 +50,14 @@ const BACKGROUND_MESSAGE_TYPES = [
   'syncManagedOrder',
   'moveFavoriteToCategory',
   'updateSettings',
+  'getFolderTree',
+  'createFolder',
+  'updateFolder',
+  'moveFolder',
+  'deleteFolder',
+  'moveFavorite',
+  'previewAIOrganization',
+  'applyAIOrganization',
   'updateFavoriteOrder',
   'consumePendingBrowserActivity',
   'saveFavorite',
@@ -68,6 +79,14 @@ const FAVORITES_SERVICE_METHODS = [
   'deleteFavorite',
   'saveFavoriteEntry',
   'updateSettings',
+  'getFolderTree',
+  'createFolder',
+  'updateFolder',
+  'moveFolder',
+  'deleteFolder',
+  'moveFavorite',
+  'previewAIOrganization',
+  'applyAIOrganization',
   'updateFavoriteOrder',
   'consumePendingBrowserActivity',
   'reclassifyFavorites',
@@ -82,13 +101,14 @@ const FAVORITES_SERVICE_METHODS = [
   'organizeBrowserBookmarks',
   'handleBookmarkCreated',
   'handleBookmarkMoved',
+  'handleBookmarkTreeChanged',
   'handleBookmarkRemoved'
 ];
 const exercisedBackgroundMessageTypes = new Set();
 
 function verifyManifestAndLocales() {
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.14.5');
+  assert.equal(manifest.version, '1.15.1');
   assert.ok(
     Array.from(popupHtml.matchAll(/\?v=([^"]+)/g), (match) => match[1])
       .every((version) => version === manifest.version)
@@ -125,6 +145,8 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="modeBtn"/);
   assert.doesNotMatch(popupHtml, /id="embeddedCloseBtn"/);
   assert.match(popupHtml, /id="compactThemeStyle"/);
+  assert.match(popupHtml, /id="categorySelectButton"[\s\S]*?role="combobox"/);
+  assert.match(popupHtml, /id="categorySelectMenu"[^>]*role="listbox"/);
   assert.match(popupHtml, /id="compactNewCategory"/);
   assert.match(popupHtml, /id="compactAddCategoryBtn"/);
   assert.match(popupHtml, /id="categoryRulesList"/);
@@ -150,6 +172,9 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="trashBackBtn"/);
   assert.match(popupHtml, /id="trashNavBtn"/);
   assert.match(popupHtml, /id="categorySaveBtn"/);
+  assert.match(popupHtml, /id="favoritesSearchInput"/);
+  assert.match(popupHtml, /id="categoriesSearchInput"/);
+  assert.match(popupHtml, /class="settings-group collapsed"[\s\S]*?class="settings-group-body" aria-hidden="true" inert/);
   assert.match(popupHtml, /id="compactPopupWidth"/);
   assert.match(popupHtml, /id="compactPopupHeight"/);
   assert.match(popupHtml, /id="compactBackgroundImage"/);
@@ -184,6 +209,17 @@ function verifyManifestAndLocales() {
   assert.doesNotMatch(popupHtml, /id="compactSaveBtn"/);
   assert.doesNotMatch(popupJs, /compactSaveBtn/);
   assert.match(popupJs, /async function persistSettingsPatch\(/);
+  assert.match(popupJs, /function setSettingsGroupCollapsed\(/);
+  assert.match(popupJs, /function renderCategorySelectControl\(/);
+  assert.match(popupJs, /function setCategorySelectOpen\(/);
+  assert.match(popupJs, /categorySelect\.dispatchEvent\(new Event\('change'/);
+  assert.doesNotMatch(popupJs, /t\('folderStats'/);
+  assert.match(popupJs, /t\('folderItemCount'/);
+  assert.equal(i18n.MESSAGES.zh_CN.folderItemCount, '{{count}} 条');
+  assert.equal(i18n.MESSAGES.en.folderItemCount, '{{count}} saved');
+  assert.match(popupJs, /body\.toggleAttribute\('inert', collapsed\)/);
+  assert.match(popupJs, /item\.dataset\.searchText \|\| item\.textContent/);
+  assert.match(popupJs, /data-search-text=/);
   assert.match(popupJs, /settingsAutoSaved/);
   assert.match(popupJs, /const MAX_BACKGROUND_IMAGE_BYTES = 800 \* 1024/);
   assert.match(popupJs, /file\.size > MAX_BACKGROUND_IMAGE_BYTES/);
@@ -207,9 +243,12 @@ function verifyManifestAndLocales() {
   );
   assert.match(popupHtml, /class="compact-toggle" for="compactBookmarkAutoCapture"/);
   assert.match(popupHtml, /class="bookmark-actions"/);
-  assert.match(backgroundJs, /chrome\.bookmarks\.onCreated\.addListener/);
-  assert.match(backgroundJs, /chrome\.bookmarks\.onRemoved\.addListener/);
-  assert.match(backgroundJs, /chrome\.bookmarks\.onMoved\.addListener/);
+  assert.match(backgroundJs, /bookmark-events\.js/);
+  assert.match(bookmarkEventsJs, /chrome\.bookmarks\.onCreated/);
+  assert.match(bookmarkEventsJs, /chrome\.bookmarks\.onRemoved/);
+  assert.match(bookmarkEventsJs, /chrome\.bookmarks\.onMoved/);
+  assert.match(bookmarkEventsJs, /chrome\.bookmarks\.onChanged/);
+  assert.match(bookmarkEventsJs, /chrome\.bookmarks\.onChildrenReordered/);
   assert.match(favoritesServiceJs, /chrome\.notifications\.create/);
   assert.match(favoritesServiceJs, /pendingBrowserActivity/);
   assert.match(backgroundJs, /organizeBookmarks/);
@@ -224,18 +263,18 @@ function verifyManifestAndLocales() {
     assert.match(backgroundJs, new RegExp(`\\n  ${type}: \\{`));
   });
   assert.match(backgroundJs, /recoverManagedFavorites/);
-  assert.match(favoritesServiceJs, /collectManagedBookmarks/);
+  assert.match(favoritesServiceJs, /collectManagedStructure/);
   assert.match(popupJs, /type:\s*'recoverManagedFavorites'/);
   assert.match(favoritesServiceJs, /SmartFavBookmarks\.removeFavorite/);
   assert.match(favoritesServiceJs, /async function reclassifyFavorites\(\)/);
-  assert.match(favoritesServiceJs, /SmartFavBookmarks\.syncManagedCategories/);
+  assert.match(favoritesServiceJs, /SmartFavBookmarks\.syncManagedFolders/);
   assert.match(favoritesServiceJs, /SmartFavBookmarks\.syncManagedOrder/);
   assert.match(
     favoritesServiceJs,
     /本文件是单一事务边界|单一事务边界/
   );
   assert.ok(
-    backgroundJs.split('\n').length - 1 <= 250,
+    backgroundJs.split('\n').length - 1 <= 280,
     'background.js should remain a thin lifecycle and transport layer'
   );
   assert.deepEqual(
@@ -254,7 +293,7 @@ function verifyManifestAndLocales() {
   assert.match(backgroundJs, /importScripts\([^)]*constants\.js/);
   assert.match(
     backgroundJs,
-    /importScripts\(\s*'constants\.js',\s*'state-store\.js',\s*'bookmark-guard\.js'/
+    /importScripts\(\s*'constants\.js',\s*'folder-tree\.js',\s*'state-store\.js',\s*'bookmark-guard\.js'/
   );
   assert.match(backgroundJs, /\} = SmartFavStateStore;/);
   assert.match(
@@ -269,7 +308,7 @@ function verifyManifestAndLocales() {
     /script-src 'self'/
   );
   assert.match(backgroundJs, /chrome\.alarms\.onAlarm\.addListener/);
-  assert.match(popupJs, /type:\s*'deleteFavorite',\s*url/);
+  assert.match(popupJs, /type:\s*'deleteFavorite',\s*favoriteId/);
   assert.match(popupJs, /type:\s*'reclassifyFavorites'/);
   assert.match(popupJs, /sendRuntimeMessage\('syncManagedOrder', \{ order \}\)/);
   assert.match(popupJs, /orderSyncedToBrowser/);
@@ -311,14 +350,12 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /if \(saved && enabled\) await runOrganizeBookmarks\(\)/);
   assert.match(popupJs, /class="favorite-delete-button"/);
   assert.match(popupJs, /class="favorite-move-select"/);
-  assert.match(popupJs, /sendRuntimeMessage\('moveFavoriteToCategory'/);
-  assert.match(popupJs, /SmartFavOrder\.moveFavoriteAcrossCategories/);
-  assert.match(popupJs, /SmartFavClassifier\.createDomainLearningProposal\(/);
-  assert.match(popupJs, /SmartFavClassifier\.applyDomainLearning\(/);
-  assert.match(popupJs, /SmartFavClassifier\.revertDomainLearning\(/);
+  assert.match(popupJs, /sendRuntimeMessage\('moveFavorite'/);
+  assert.match(popupJs, /function buildFolderDomainLearningProposal\(/);
+  assert.match(popupJs, /function createFolderLearningResult\(/);
   assert.match(popupJs, /elements\.pageLearningCheckbox\.checked = !isFallback/);
-  assert.match(popupJs, /suggestedCategory: recommendedCategory/);
-  assert.match(popupJs, /manuallyCategorized: selectedCategory !== recommendedCategory/);
+  assert.match(popupJs, /suggestedFolderId: recommendedCategory/);
+  assert.match(popupJs, /manuallyCategorized: selectedFolderId !== recommendedCategory/);
   assert.match(popupJs, /schedulePopupClose\(learningResult \? 6500 : 1300\)/);
   assert.match(popupJs, /async function updateStoredSettings\(settingsPatch\)/);
   assert.match(popupJs, /sendRuntimeMessage\('updateSettings', \{ patch: settingsPatch \}\)/);
@@ -327,12 +364,11 @@ function verifyManifestAndLocales() {
     popupJs,
     /class="favorite-row favorite-row-card\$\{inFolder \? ' favorite-row-in-folder' : ''\}"/
   );
-  assert.match(popupJs, /draggable="true"[\s\S]{0,160}data-category=/);
+  assert.match(popupJs, /draggable="true"[\s\S]{0,160}data-favorite-id=/);
   assert.match(popupJs, /data-favorite-url=/);
   assert.match(popupJs, /SmartFavOrder\.reorderValues/);
-  assert.match(popupJs, /SmartFavOrder\.reorderFavoriteUrls/);
-  assert.match(popupJs, /SmartFavOrder\.moveFavoriteUrl/);
-  assert.match(popupJs, /async function updateStoredFavoriteOrder\(category, orderedUrls\)/);
+  assert.match(popupJs, /async function saveFavoriteOrder\(folderId, nextIds/);
+  assert.match(popupJs, /async function updateStoredFavoriteOrder\(folderId, orderedFavoriteIds\)/);
   assert.match(backgroundJs, /\n  updateFavoriteOrder: \{/);
   assert.match(popupJs, /aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/);
   assert.match(
@@ -354,7 +390,7 @@ function verifyManifestAndLocales() {
     popupJs,
     /if \(categoryToKeep\) \{[\s\S]{0,360}showFavoritesByCategory\(categoryToKeep, favorites, result\.favoriteOrder\)/
   );
-  assert.match(popupJs, /async function deleteFavorite\(url\)/);
+  assert.match(popupJs, /async function deleteFavorite\(identifier\)/);
   assert.match(popupJs, /showingAllFavorites = !showingAllFavorites/);
   assert.match(popupJs, /t\(showingAllFavorites \? 'showLess' : 'viewAll'\)/);
   assert.match(
@@ -370,7 +406,9 @@ function verifyManifestAndLocales() {
     /if \(shouldOrganize\) \{/
   );
   assert.match(favoritesServiceJs, /SmartFavBookmarks\.writeFavorite\(/);
-  assert.match(favoritesServiceJs, /if \(!shouldCapture && !shouldOrganize\) return/);
+  // 只开「整理」不开「自动采集」时仍按分类归位浏览器书签，但不得删除同网址的其他副本
+  // （本地没有记录，删除既不可追溯也无法恢复）。
+  assert.match(favoritesServiceJs, /if \(settings\.bookmarkWriteMode !== 'add' && shouldCapture\)/);
   assert.match(popupJs, /chrome\.tabs\.update\(activeTab\.id, \{ url \}/);
   assert.match(popupJs, /t\('backToCategories'\)/);
   assert.match(
@@ -392,6 +430,11 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /\.app-shell\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s);
   assert.match(popupCss, /\.panel-view,\s*\.settings-view\s*\{[^}]*overflow-y:\s*auto;/s);
   assert.match(popupCss, /\.content-back-button\s*\{/);
+  assert.match(popupCss, /\.view-back-row\s*\{[^}]*position:\s*sticky;[^}]*top:\s*0;/s);
+  assert.match(popupCss, /\.search-bar\s*\{[^}]*top:\s*var\(--view-back-row-height\);/s);
+  assert.match(popupCss, /\.category-select-menu\s*\{[^}]*top:\s*calc\(100% \+ 5px\);/s);
+  assert.match(popupCss, /\.save-card\.has-open-select\s*\{[^}]*z-index:\s*40;/s);
+  assert.match(popupCss, /\.settings-group-header\s*\{[^}]*padding:\s*10px 14px;/s);
   assert.match(popupCss, /\.background-image-field\s*\{/);
   assert.match(popupCss, /--custom-background-position:\s*50% 50%/);
   assert.match(popupCss, /background-position:\s*center, var\(--custom-background-position\)/);
@@ -408,7 +451,24 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /\.notice-action\s*\{/);
   assert.match(popupCss, /\.reorder-grip\s*\{/);
   assert.match(popupCss, /\.folder-item\.is-drop-before,/);
+  assert.match(popupCss, /\.folder-item\.is-drop-top::before,/);
+  assert.match(popupCss, /\.folder-item\.is-drop-bottom::after,/);
+  assert.match(popupCss, /\.folder-item\.is-drop-left::before,/);
+  assert.match(popupCss, /\.folder-item\.is-drop-right::after/);
+  assert.doesNotMatch(popupCss, /content:\s*attr\(data-drop-position\)/);
+  assert.doesNotMatch(popupJs, /dataset\.dropPosition/);
+  assert.match(popupJs, /function getGridDropDirection\(event, target\)/);
+  assert.match(popupJs, /function getGridDropPlacement\(direction\)/);
+  assert.match(popupJs, /target\.classList\.add\(`is-drop-\$\{direction\}`\)/);
+  assert.match(popupJs, /t\('folderDropPreview'/);
+  assert.doesNotMatch(popupJs, /applyFolderDropPreviewFixture/);
+  assert.doesNotMatch(popupJs, /params\.get\('dropPreview'\)/);
+  assert.match(i18n.MESSAGES.zh_CN.folderDropPreview, /预计.*第.*位/);
+  assert.match(i18n.MESSAGES.en.folderDropPreview, /position/);
   assert.match(popupCss, /\.favorite-row-in-folder\.is-drop-before\s*\{/);
+  assert.match(popupCss, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(popupCss, /\.folder-item\.motion-settled/);
+  assert.match(popupCss, /input::\-webkit-search-cancel-button\s*\{[^}]*appearance:\s*none/s);
   assert.match(
     popupCss,
     /\.appearance-toggle input\[type="checkbox"\],[\s\S]{0,320}\.page-learning-option input\[type="checkbox"\]\s*\{[^}]*flex:\s*0 0 18px;[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*appearance:\s*none;/s
@@ -800,6 +860,17 @@ async function verifyAIProtocols() {
   assert.equal(aiClient.getProvider('openai_compatible').customEndpoint, true);
   assert.equal(aiClient.getProvider('anthropic_compatible').customEndpoint, true);
 
+  await assert.rejects(
+    aiClient.call('Return JSON', {
+      language: 'en',
+      apiProvider: 'openai_compatible',
+      apiEndpoint: 'https://gateway.example.com/v1/chat/completions',
+      apiKey: '',
+      model: 'custom-openai-model'
+    }),
+    /Enter an API Key in settings first/
+  );
+
   assert.deepEqual(
     aiClient.validateEndpoint('https://gateway.example.com/v1/chat/completions'),
     {
@@ -1176,7 +1247,7 @@ async function verifyBookmarkModes() {
   assert.equal(urlMatchesAfterDeduplicate.length, 1);
   assert.equal(urlMatchesAfterDeduplicate[0].title, 'Deduplicated page');
 
-  // 覆盖模式必须命中 SmartFav 文件夹外由浏览器星标创建的同网址收藏。
+  // 覆盖模式也只管理 SmartFav 根目录，不改写外部同网址星标。
   const externalApi = createMockBookmarks();
   const external = await new Promise((resolve) => externalApi.create(
     { title: 'Browser star', url: 'https://external.example.com' },
@@ -1191,13 +1262,15 @@ async function verifyBookmarkModes() {
     { browserBookmarksEnabled: true, bookmarkWriteMode: 'overwrite' },
     externalApi
   );
-  assert.equal(externalUpdated.status, 'updated');
-  assert.equal(externalUpdated.id, external.id);
+  assert.equal(externalUpdated.status, 'created');
+  assert.notEqual(externalUpdated.id, external.id);
   const externalMatches = [...externalApi.nodes.values()]
     .filter((node) => node.url === 'https://external.example.com');
-  assert.equal(externalMatches.length, 1);
-  assert.equal(externalMatches[0].title, 'SmartFav title');
-  assert.equal(externalApi.nodes.get(externalMatches[0].parentId).title, 'Learning');
+  assert.equal(externalMatches.length, 2);
+  assert.equal(externalApi.nodes.get(external.parentId).title, 'Other favorites');
+  const managedExternalMatch = externalMatches.find((node) => node.id !== external.id);
+  assert.equal(managedExternalMatch.title, 'SmartFav title');
+  assert.equal(externalApi.nodes.get(managedExternalMatch.parentId).title, 'Learning');
 
   const disabled = await browserBookmarks.writeFavorite(
     first,
@@ -1696,11 +1769,17 @@ function createBackgroundHarness(
 ) {
   const bookmarks = createMockBookmarks();
   const state = {
+    folderSchemaVersion: Number.isFinite(Number(options.folderSchemaVersion))
+      ? Number(options.folderSchemaVersion)
+      : 2,
+    folderMigrationBackup: options.folderMigrationBackup || null,
+    folders: Array.isArray(options.folders) ? options.folders.map((folder) => ({ ...folder })) : [],
     settings: { ...initialSettings },
     favorites: [...initialFavorites],
     favoriteOrder: { ...initialFavoriteOrder },
     recentlyDeleted: [...initialRecentlyDeleted],
     bookmarkRestorePoints: [...initialRestorePoints],
+    aiOrganizationPreviews: [],
     pendingBrowserActivity: null
   };
   const listeners = {};
@@ -1725,7 +1804,23 @@ function createBackgroundHarness(
         listeners.onMoved = listener;
       }
     },
+    onChanged: {
+      addListener(listener) {
+        listeners.onChanged = listener;
+      }
+    },
+    onChildrenReordered: {
+      addListener(listener) {
+        listeners.onChildrenReordered = listener;
+      }
+    },
     move(id, destination, callback) {
+      if (options.bookmarkMoveError) {
+        chromeMock.runtime.lastError = { message: options.bookmarkMoveError };
+        callback(undefined);
+        chromeMock.runtime.lastError = null;
+        return;
+      }
       const normalizedId = String(id);
       const before = bookmarks.nodes.get(normalizedId);
       const oldParentId = before && before.parentId;
@@ -1958,11 +2053,15 @@ function createStateStoreChrome(initial = {}, options = {}) {
 
 async function verifyStateStore() {
   assert.deepEqual(Array.from(stateStore.STATE_KEYS), [
+    'folderSchemaVersion',
+    'folderMigrationBackup',
+    'folders',
     'settings',
     'favorites',
     'favoriteOrder',
     'recentlyDeleted',
     'bookmarkRestorePoints',
+    'aiOrganizationPreviews',
     'pendingBrowserActivity'
   ]);
 
@@ -1981,6 +2080,7 @@ async function verifyStateStore() {
   assert.deepEqual(stored.favoriteOrder, { Tools: [validFavorite.url] });
   assert.deepEqual(stored.recentlyDeleted, []);
   assert.deepEqual(stored.bookmarkRestorePoints, []);
+  assert.equal(stored.folderMigrationBackup, null);
   assert.equal(stored.pendingBrowserActivity.id, 'activity-1');
 
   await stateStore.setStoredFavorites([validFavorite], success.chromeApi);
@@ -2231,6 +2331,7 @@ async function verifyFavoritesServiceDependencyInjection() {
         favoriteOrder: {},
         recentlyDeleted: [],
         bookmarkRestorePoints: [],
+        aiOrganizationPreviews: [],
         pendingBrowserActivity: null
       });
     },
@@ -2267,6 +2368,8 @@ async function verifyFavoritesServiceDependencyInjection() {
     order: orderUtils,
     i18n,
     constants,
+    folderTree,
+    aiOrganization,
     logger: { log() {}, error() {} }
   });
   const result = await service.getRecentlyDeleted();
@@ -2337,6 +2440,390 @@ async function verifyBackgroundMessageRoutes() {
     { type: 'createBookmarkRestorePoint' }
   );
   assert.equal(restorePoint.status, 'ok');
+
+  const initialTree = await sendBackgroundMessage(harness, { type: 'getFolderTree' });
+  assert.equal(initialTree.status, 'ok');
+  const rootFolder = initialTree.folders[0];
+  const targetFolder = initialTree.folders[1];
+  const created = await sendBackgroundMessage(harness, {
+    type: 'createFolder',
+    folder: { parentId: rootFolder.id, name: 'Route child', keywords: ['route'] }
+  });
+  assert.equal(created.status, 'ok');
+  const updated = await sendBackgroundMessage(harness, {
+    type: 'updateFolder',
+    folderId: created.folder.id,
+    patch: { name: 'Route child renamed', keywords: ['route', 'domain:route.example'] }
+  });
+  assert.equal(updated.status, 'ok');
+  const movedFolder = await sendBackgroundMessage(harness, {
+    type: 'moveFolder',
+    folderId: created.folder.id,
+    targetParentId: targetFolder.id,
+    index: 0
+  });
+  assert.equal(movedFolder.status, 'ok');
+  const saved = await sendBackgroundMessage(harness, {
+    type: 'saveFavorite',
+    favorite: {
+      title: 'Route favorite',
+      url: 'https://route.example/item',
+      folderId: created.folder.id,
+      category: 'Route child renamed'
+    }
+  });
+  assert.equal(saved.status, 'ok');
+  const movedFavorite = await sendBackgroundMessage(harness, {
+    type: 'moveFavorite',
+    favoriteId: saved.favorite.id,
+    targetFolderId: rootFolder.id,
+    index: 0
+  });
+  assert.equal(movedFavorite.status, 'ok', JSON.stringify(movedFavorite));
+  const foldersBeforePreview = JSON.stringify(harness.state.folders);
+  const favoritesBeforePreview = JSON.stringify(harness.state.favorites);
+  const preview = await sendBackgroundMessage(harness, {
+    type: 'previewAIOrganization',
+    operations: [{
+      id: 'route-ai-keywords',
+      type: 'add_keywords',
+      folderId: rootFolder.id,
+      keywords: ['route-ai']
+    }]
+  });
+  assert.equal(preview.status, 'ok');
+  assert.equal(JSON.stringify(harness.state.folders), foldersBeforePreview);
+  assert.equal(JSON.stringify(harness.state.favorites), favoritesBeforePreview);
+  const applied = await sendBackgroundMessage(harness, {
+    type: 'applyAIOrganization',
+    proposalId: preview.proposalId,
+    operationIds: ['route-ai-keywords']
+  });
+  assert.equal(applied.status, 'ok');
+  const deleted = await sendBackgroundMessage(harness, {
+    type: 'deleteFolder',
+    folderId: created.folder.id,
+    targetFolderId: rootFolder.id
+  });
+  assert.equal(deleted.status, 'ok');
+}
+
+function verifyFolderTreeAndAIOrganization() {
+  const legacy = {
+    folderSchemaVersion: 0,
+    settings: {
+      language: 'en',
+      categories: ['Work', 'Other'],
+      keywordRules: { Work: ['project'], Other: [] }
+    },
+    favorites: [
+      { title: 'One', url: 'https://same.example/', category: 'Work' },
+      { title: 'Two', url: 'https://same.example/', category: 'Other' }
+    ],
+    favoriteOrder: { Work: ['https://same.example/'] }
+  };
+  const migrated = folderTree.migrateState(legacy, {
+    language: 'en',
+    categories: ['Work', 'Other'],
+    keywordRules: { Work: ['project'], Other: [] }
+  });
+  assert.equal(migrated.folderSchemaVersion, 2);
+  assert.equal(migrated.folders.length, 2);
+  assert.equal(migrated.favorites.length, 2);
+  assert.notEqual(migrated.favorites[0].id, migrated.favorites[1].id);
+  const repeated = folderTree.migrateState({ ...legacy, ...migrated }, legacy.settings);
+  assert.equal(repeated.changed, false);
+  assert.deepEqual(repeated.folders, migrated.folders);
+  assert.deepEqual(repeated.favorites, migrated.favorites);
+
+  let folders = migrated.folders;
+  const work = folders.find((folder) => folder.name === 'Work');
+  const other = folders.find((folder) => folder.name === 'Other');
+  const level2 = folderTree.createFolder(folders, {
+    parentId: work.id,
+    name: 'Clients',
+    keywords: ['client']
+  });
+  assert.equal(level2.status, 'ok');
+  folders = level2.folders;
+  const level3 = folderTree.createFolder(folders, {
+    parentId: level2.folder.id,
+    name: 'A Company',
+    keywords: ['domain:a.example.com']
+  });
+  assert.equal(level3.status, 'ok');
+  folders = level3.folders;
+  const level4 = folderTree.createFolder(folders, {
+    parentId: level3.folder.id,
+    name: 'Research',
+    keywords: ['benchmark']
+  });
+  assert.equal(level4.status, 'ok');
+  folders = level4.folders;
+  assert.equal(folderTree.getPath(folders, level4.folder.id).length, 4);
+  assert.equal(folderTree.getPathLabel(folders, level4.folder.id), 'Work › Clients › A Company › Research');
+
+  const sameElsewhere = folderTree.createFolder(folders, {
+    parentId: other.id,
+    name: 'Clients'
+  });
+  assert.equal(sameElsewhere.status, 'ok');
+  const sameSibling = folderTree.createFolder(sameElsewhere.folders, {
+    parentId: other.id,
+    name: 'clients'
+  });
+  assert.equal(sameSibling.status, 'conflict');
+  const cycle = folderTree.moveFolder(folders, work.id, level4.folder.id);
+  assert.equal(cycle.status, 'conflict');
+
+  const folderSuggestion = classifier.classifyFolders({
+    title: 'A Company benchmark report',
+    url: 'https://reports.example.com/benchmark',
+    description: 'client research'
+  }, { language: 'en', classificationMode: 'weighted' }, folders);
+  assert.equal(folderSuggestion.folderId, level4.folder.id);
+
+  const deleted = folderTree.deleteFolder(
+    folders,
+    [{ id: 'fav-direct', folderId: level2.folder.id, url: 'https://direct.example/' }],
+    { [level2.folder.id]: ['fav-direct'] },
+    level2.folder.id,
+    other.id
+  );
+  assert.equal(deleted.status, 'ok');
+  assert.equal(deleted.favorites[0].folderId, other.id);
+  assert.equal(folderTree.getFolder(deleted.folders, level3.folder.id).parentId, other.id);
+
+  const empty = folderTree.createFolder(deleted.folders, {
+    parentId: other.id,
+    name: 'Temporary empty folder'
+  });
+  assert.equal(empty.status, 'ok');
+  const deletedEmpty = folderTree.deleteFolder(
+    empty.folders,
+    deleted.favorites,
+    deleted.favoriteOrder,
+    empty.folder.id
+  );
+  assert.equal(deletedEmpty.status, 'ok');
+  assert.equal(folderTree.getFolder(deletedEmpty.folders, empty.folder.id), null);
+  const missingMigrationTarget = folderTree.deleteFolder(
+    folders,
+    [{ id: 'fav-direct', folderId: level2.folder.id, url: 'https://direct.example/' }],
+    { [level2.folder.id]: ['fav-direct'] },
+    level2.folder.id
+  );
+  assert.equal(missingMigrationTarget.status, 'invalid');
+
+  // 深度上限：从 4 层继续往下建到 MAX_DEPTH，第 MAX_DEPTH+1 层必须被拒绝。
+  let deepFolders = folders;
+  let deepParentId = level4.folder.id;
+  for (let depth = 5; depth <= folderTree.MAX_DEPTH; depth += 1) {
+    const created = folderTree.createFolder(deepFolders, {
+      parentId: deepParentId,
+      name: `Level ${depth}`
+    });
+    assert.equal(created.status, 'ok', `depth ${depth} must be allowed`);
+    deepFolders = created.folders;
+    deepParentId = created.folder.id;
+  }
+  const tooDeep = folderTree.createFolder(deepFolders, {
+    parentId: deepParentId,
+    name: 'Too deep'
+  });
+  assert.equal(tooDeep.status, 'conflict');
+  // 移动时要按「子树高度 + 目标深度」判断，而不是只看目标自身深度。
+  const movedTooDeep = folderTree.moveFolder(deepFolders, work.id, deepParentId);
+  assert.equal(movedTooDeep.status, 'conflict');
+
+  // 零宽字符不能用来绕过同级同名校验。
+  const zeroWidthSibling = folderTree.createFolder(folders, {
+    parentId: work.id,
+    name: 'Cl\u200bients'
+  });
+  assert.equal(zeroWidthSibling.status, 'conflict');
+
+  // 环检测只应打断真正处在环上的节点，不能牵连无关的兄弟节点。
+  const damaged = folderTree.normalizeFolders([
+    { id: 'loop-a', parentId: 'loop-b', name: 'A' },
+    { id: 'loop-b', parentId: 'loop-a', name: 'B' },
+    { id: 'innocent', parentId: 'safe-root', name: 'Innocent' },
+    { id: 'safe-root', parentId: null, name: 'Safe root' }
+  ]);
+  assert.equal(damaged.find((folder) => folder.id === 'innocent').parentId, 'safe-root');
+  const brokenLoopLinks = damaged
+    .filter((folder) => ['loop-a', 'loop-b'].includes(folder.id) && folder.parentId === null);
+  assert.equal(brokenLoopLinks.length >= 1, true, 'cycle must be broken somewhere');
+
+  // 删除文件夹后，整棵被迁移子树的 category 快照都要刷新，而不只是直接子节点。
+  const subtreeFavorites = [
+    { id: 'fav-l3', folderId: level3.folder.id, url: 'https://l3.example/', category: 'stale' },
+    { id: 'fav-l4', folderId: level4.folder.id, url: 'https://l4.example/', category: 'stale' }
+  ];
+  const subtreeDeleted = folderTree.deleteFolder(
+    folders,
+    subtreeFavorites,
+    { [level3.folder.id]: ['fav-l3'], [level4.folder.id]: ['fav-l4'] },
+    level2.folder.id,
+    other.id
+  );
+  assert.equal(subtreeDeleted.status, 'ok');
+  subtreeDeleted.favorites.forEach((favorite) => {
+    assert.notEqual(favorite.category, 'stale');
+    assert.equal(
+      favorite.category,
+      folderTree.getPathLabel(subtreeDeleted.folders, favorite.folderId)
+    );
+  });
+
+  // URL 协议白名单：只有 http(s) 可以进入收藏与导航路径。
+  assert.equal(constants.isSafeNavigableUrl('https://ok.example/'), true);
+  assert.equal(constants.isSafeNavigableUrl('javascript:alert(1)'), false);
+  assert.equal(constants.isSafeNavigableUrl('data:text/html,<b>x</b>'), false);
+  assert.equal(constants.isSafeNavigableUrl(' java\tscript:alert(1)'), false);
+  assert.equal(constants.isSafeNavigableUrl('chrome://settings'), false);
+
+  const profiles = aiOrganization.buildProfiles(
+    folders,
+    [{ id: 'fav-ai', folderId: level4.folder.id, title: 'AI item', url: 'https://a.example.com/p?q=private' }],
+    folderTree
+  );
+  const sample = profiles.find((profile) => profile.folderId === level4.folder.id).favorites[0];
+  assert.equal(sample.path, '/p');
+  assert.equal(Object.prototype.hasOwnProperty.call(sample, 'url'), false);
+  const validated = aiOrganization.validateOperations([
+    { id: 'bad-delete', type: 'delete_folder', folderId: work.id },
+    { id: 'bad-id', type: 'move_favorite', favoriteId: 'missing', targetFolderId: work.id },
+    { id: 'safe-name', type: 'create_folder', parentId: work.id, temporaryId: 'new-safe', name: '<script>/Client', keywords: ['x'] }
+  ], folders, [{ id: 'fav-ai', folderId: level4.folder.id }], folderTree);
+  assert.equal(validated.operations.length, 1);
+  assert.doesNotMatch(validated.operations[0].name, /[<>/]/);
+  assert.equal(validated.rejected.length, 2);
+  assert.throws(() => aiOrganization.parseOperations('not-json'), /does not contain JSON/);
+}
+
+async function verifySubfolderSafetyRegressions() {
+  const enDefaults = classifier.getDefaults('en');
+  const baseSettings = {
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: false,
+    bookmarkWriteMode: 'overwrite',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: false
+  };
+
+  // saveFavorite 必须同步维护 favoriteOrder，否则子文件夹里的手工排序会丢。
+  const orderHarness = createBackgroundHarness({ ...baseSettings });
+  const orderTree = await sendBackgroundMessage(orderHarness, { type: 'getFolderTree' });
+  const orderChild = await sendBackgroundMessage(orderHarness, {
+    type: 'createFolder',
+    folder: { parentId: orderTree.folders[0].id, name: 'Order child' }
+  });
+  assert.equal(orderChild.status, 'ok');
+  const firstSaved = await sendBackgroundMessage(orderHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'First', url: 'https://order-1.example/', folderId: orderChild.folder.id }
+  });
+  const secondSaved = await sendBackgroundMessage(orderHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Second', url: 'https://order-2.example/', folderId: orderChild.folder.id }
+  });
+  assert.equal(firstSaved.status, 'ok');
+  assert.equal(secondSaved.status, 'ok');
+  // state 来自 vm 沙箱，数组原型与本 realm 不同，deepEqual 会因 reference 不同而失败，
+  // 所以这里比较序列化结果。
+  const childOrder = orderHarness.state.favoriteOrder[orderChild.folder.id] || [];
+  assert.equal(
+    JSON.stringify([...childOrder]),
+    JSON.stringify([secondSaved.favorite.id, firstSaved.favorite.id])
+  );
+
+  // 删除文件夹时浏览器侧同步失败：本地必须已经写入且收藏不能丢，只降级为 partial。
+  const failingHarness = createBackgroundHarness(
+    { ...baseSettings, browserBookmarksEnabled: true },
+    [],
+    [],
+    [],
+    {},
+    { bookmarkMoveError: 'Simulated bookmark move failure' }
+  );
+  const failingTree = await sendBackgroundMessage(failingHarness, { type: 'getFolderTree' });
+  const doomed = await sendBackgroundMessage(failingHarness, {
+    type: 'createFolder',
+    folder: { parentId: failingTree.folders[0].id, name: 'Doomed folder' }
+  });
+  assert.equal(doomed.status, 'ok');
+  const keptFavorite = await sendBackgroundMessage(failingHarness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Kept', url: 'https://kept.example/', folderId: doomed.folder.id }
+  });
+  assert.equal(keptFavorite.status, 'ok');
+  const removal = await sendBackgroundMessage(failingHarness, {
+    type: 'deleteFolder',
+    folderId: doomed.folder.id,
+    targetFolderId: failingTree.folders[1].id
+  });
+  assert.equal(removal.status, 'ok', JSON.stringify(removal));
+  assert.equal(removal.browserStatus, 'partial');
+  // 本地事务已提交：文件夹消失，但收藏被迁移而不是被删掉。
+  assert.equal(
+    failingHarness.state.folders.some((folder) => folder.id === doomed.folder.id),
+    false
+  );
+  const survivor = failingHarness.state.favorites
+    .find((favorite) => favorite.id === keptFavorite.favorite.id);
+  assert.ok(survivor, 'favorite must survive a failed browser sync');
+  assert.equal(survivor.folderId, failingTree.folders[1].id);
+}
+
+async function verifyMigrationSafetySnapshot() {
+  const enDefaults = classifier.getDefaults('en');
+  const harness = createBackgroundHarness(
+    {
+      language: 'en',
+      categories: enDefaults.categories,
+      keywordRules: enDefaults.keywordRules,
+      browserBookmarksEnabled: false,
+      bookmarkWriteMode: 'overwrite',
+      bookmarkOrganizeEnabled: false,
+      bookmarkAutoCaptureEnabled: false
+    },
+    [{
+      title: 'Legacy favorite',
+      url: 'https://legacy-migration.example.com/',
+      category: 'Tools'
+    }],
+    [],
+    [],
+    { Tools: ['https://legacy-migration.example.com/'] },
+    { folderSchemaVersion: 1 }
+  );
+  await createBookmark(harness.bookmarks, {
+    title: 'External before migration',
+    url: 'https://external-before-migration.example.com/'
+  });
+
+  const migrated = await sendBackgroundMessage(harness, { type: 'getFolderTree' });
+  assert.equal(migrated.status, 'ok');
+  assert.equal(harness.state.folderSchemaVersion, 2);
+  assert.equal(harness.state.folderMigrationBackup.fromFolderSchemaVersion, 1);
+  assert.equal(harness.state.folderMigrationBackup.state.favorites.length, 1);
+  assert.equal(harness.state.folderMigrationBackup.state.favorites[0].id, undefined);
+  assert.equal(harness.state.folderMigrationBackup.browserRestoreStatus, 'ok');
+  assert.ok(harness.state.folderMigrationBackup.browserRestorePointId);
+  const migrationPoint = harness.state.bookmarkRestorePoints.find((point) => (
+    point.id === harness.state.folderMigrationBackup.browserRestorePointId
+  ));
+  assert.equal(migrationPoint.reason, 'schema-v2-migration');
+  assert.equal(migrationPoint.bookmarks.length, 1);
+
+  const backupCreatedAt = harness.state.folderMigrationBackup.createdAt;
+  const restorePointCount = harness.state.bookmarkRestorePoints.length;
+  await sendBackgroundMessage(harness, { type: 'getFolderTree' });
+  assert.equal(harness.state.folderMigrationBackup.createdAt, backupCreatedAt);
+  assert.equal(harness.state.bookmarkRestorePoints.length, restorePointCount);
 }
 
 async function verifySaveFavoriteConsistency() {
@@ -2753,24 +3240,27 @@ async function verifyCrossEntryConsistency() {
     {},
     { storageDelay: true }
   );
+  const orderTree = await sendBackgroundMessage(orderHarness, { type: 'getFolderTree' });
+  const orderToolsId = orderTree.folders.find((folder) => folder.name === 'Tools').id;
+  const orderLearningId = orderTree.folders.find((folder) => folder.name === 'Learning').id;
+  orderHarness.state.favorites = [
+    { id: 'fav-tool', folderId: orderToolsId, title: 'Tool', url: 'https://order.example.com/tool', category: 'Tools' },
+    { id: 'fav-learn', folderId: orderLearningId, title: 'Learn', url: 'https://order.example.com/learn', category: 'Learning' }
+  ];
   await Promise.all([
     sendBackgroundMessage(orderHarness, {
       type: 'updateFavoriteOrder',
-      category: 'Tools',
-      orderedUrls: ['https://order.example.com/tool']
+      folderId: orderToolsId,
+      orderedFavoriteIds: ['fav-tool']
     }),
     sendBackgroundMessage(orderHarness, {
       type: 'updateFavoriteOrder',
-      category: 'Learning',
-      orderedUrls: ['https://order.example.com/learn']
+      folderId: orderLearningId,
+      orderedFavoriteIds: ['fav-learn']
     })
   ]);
-  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder.Tools), [
-    'https://order.example.com/tool'
-  ]);
-  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder.Learning), [
-    'https://order.example.com/learn'
-  ]);
+  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder[orderToolsId]), ['fav-tool']);
+  assert.deepEqual(Array.from(orderHarness.state.favoriteOrder[orderLearningId]), ['fav-learn']);
 
   // 旧弹窗只能消费自己展示的活动，不能清掉随后到达的新活动。
   const activityHarness = createBackgroundHarness(baseSettings);
@@ -2890,6 +3380,158 @@ async function verifyInternalMarkPersistence() {
   assert.ok(
     Object.prototype.hasOwnProperty.call(harness.sessionState, 'internalBookmarkRemovals'),
     'internal removal marks should be persisted into storage.session'
+  );
+}
+
+async function verifyMultilevelBrowserSync() {
+  const enDefaults = classifier.getDefaults('en');
+  const harnessOptions = {};
+  const harness = createBackgroundHarness({
+    language: 'en',
+    categories: enDefaults.categories,
+    keywordRules: enDefaults.keywordRules,
+    browserBookmarksEnabled: true,
+    bookmarkWriteMode: 'add',
+    bookmarkOrganizeEnabled: false,
+    bookmarkAutoCaptureEnabled: true
+  }, [], [], [], {}, harnessOptions);
+  const initial = await sendBackgroundMessage(harness, { type: 'getFolderTree' });
+  const work = initial.folders.find((folder) => folder.name === 'Programming');
+  const other = initial.folders.find((folder) => folder.name === 'Other');
+  let parentId = work.id;
+  const createdFolders = [];
+  for (const name of ['Clients', 'A Company', 'Research']) {
+    const response = await sendBackgroundMessage(harness, {
+      type: 'createFolder',
+      folder: { parentId, name, keywords: [name.toLowerCase()] }
+    });
+    assert.equal(response.status, 'ok');
+    createdFolders.push(response.folder);
+    parentId = response.folder.id;
+  }
+  assert.equal(folderTree.getPath(harness.state.folders, parentId).length, 4);
+  assert.ok(createdFolders.every((folder) => (
+    harness.state.folders.find((item) => item.id === folder.id).browserFolderId
+  )));
+
+  const duplicateUrl = 'https://duplicate.example.com/item';
+  const first = await sendBackgroundMessage(harness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Deep copy', url: duplicateUrl, folderId: parentId }
+  });
+  const second = await sendBackgroundMessage(harness, {
+    type: 'saveFavorite',
+    favorite: { title: 'Root copy', url: duplicateUrl, folderId: other.id }
+  });
+  assert.equal(first.status, 'ok');
+  assert.equal(second.status, 'ok');
+  assert.equal(harness.state.favorites.filter((favorite) => favorite.url === duplicateUrl).length, 2);
+  assert.equal(
+    [...harness.bookmarks.nodes.values()].filter((node) => node.url === duplicateUrl).length,
+    2
+  );
+
+  const firstLocal = harness.state.favorites.find((favorite) => favorite.id === first.favorite.id);
+  const otherFolder = harness.state.folders.find((folder) => folder.id === other.id);
+  await fireBookmarkMoved(
+    harness,
+    firstLocal.browserBookmarkId,
+    otherFolder.browserFolderId,
+    0
+  );
+  assert.equal(
+    harness.state.favorites.find((favorite) => favorite.id === firstLocal.id).folderId,
+    other.id
+  );
+
+  const aCompany = harness.state.folders.find((folder) => folder.name === 'A Company');
+  harness.bookmarks.update(aCompany.browserFolderId, { title: 'A Company Renamed' }, () => {});
+  harness.listeners.onChanged(aCompany.browserFolderId, { title: 'A Company Renamed' });
+  await flushBackgroundEvents();
+  assert.equal(
+    harness.state.folders.find((folder) => folder.id === aCompany.id).name,
+    'A Company Renamed'
+  );
+
+  const research = harness.state.folders.find((folder) => folder.name === 'Research');
+  await fireBookmarkMoved(
+    harness,
+    research.browserFolderId,
+    otherFolder.browserFolderId,
+    0
+  );
+  assert.equal(
+    harness.state.folders.find((folder) => folder.id === research.id).parentId,
+    other.id
+  );
+
+  // Simulate a browser-side move while the extension worker is stopped, then reconcile on startup.
+  const movedOffline = harness.state.favorites.find((favorite) => favorite.id === second.favorite.id);
+  const deepBrowserFolder = harness.state.folders.find((folder) => folder.id === research.id);
+  await new Promise((resolve) => {
+    harness.bookmarks.move(
+      movedOffline.browserBookmarkId,
+      { parentId: deepBrowserFolder.browserFolderId, index: 0 },
+      resolve
+    );
+  });
+  harness.listeners.onStartup();
+  await flushBackgroundEvents();
+  assert.equal(
+    harness.state.favorites.find((favorite) => favorite.id === movedOffline.id).folderId,
+    research.id
+  );
+
+  // Deleting the whole SmartFav browser root must preserve local data for a later rebuild.
+  const root = [...harness.bookmarks.nodes.values()]
+    .find((node) => !node.url && node.title === 'SmartFav');
+  const favoriteCountBeforeRootDelete = harness.state.favorites.length;
+  const folderCountBeforeRootDelete = harness.state.folders.length;
+  await fireBookmarkRemoved(harness, root.id);
+  assert.equal(harness.state.favorites.length, favoriteCountBeforeRootDelete);
+  assert.equal(harness.state.folders.length, folderCountBeforeRootDelete);
+  assert.ok(harness.state.folders.every((folder) => !folder.browserFolderId));
+  assert.ok(harness.state.favorites.every((favorite) => !favorite.browserBookmarkId));
+
+  const disabled = await sendBackgroundMessage(harness, {
+    type: 'updateSettings',
+    patch: { browserBookmarksEnabled: false }
+  });
+  assert.equal(disabled.status, 'ok');
+  const rebuilt = await sendBackgroundMessage(harness, {
+    type: 'updateSettings',
+    patch: { browserBookmarksEnabled: true }
+  });
+  assert.equal(rebuilt.status, 'ok');
+  assert.ok(harness.state.folders.every((folder) => folder.browserFolderId));
+  assert.ok(harness.state.favorites.every((favorite) => favorite.browserBookmarkId));
+
+  const failureFavorite = harness.state.favorites[0];
+  const failureTarget = harness.state.folders.find((folder) => folder.id !== failureFavorite.folderId);
+  const failurePreview = await sendBackgroundMessage(harness, {
+    type: 'previewAIOrganization',
+    operations: [{
+      id: 'fail-mid-batch',
+      type: 'move_favorite',
+      favoriteId: failureFavorite.id,
+      targetFolderId: failureTarget.id,
+      reason: 'test compensation'
+    }]
+  });
+  assert.equal(failurePreview.status, 'ok');
+  harnessOptions.bookmarkMoveError = 'simulated move failure';
+  const failedApply = await sendBackgroundMessage(harness, {
+    type: 'applyAIOrganization',
+    proposalId: failurePreview.proposalId,
+    operationIds: ['fail-mid-batch']
+  });
+  harnessOptions.bookmarkMoveError = '';
+  assert.equal(failedApply.status, 'partial');
+  assert.equal(failedApply.recoveryAvailable, true);
+  assert.ok(failedApply.restorePoint);
+  assert.equal(
+    harness.state.favorites.find((favorite) => favorite.id === failureFavorite.id).folderId,
+    failureFavorite.folderId
   );
 }
 
@@ -3054,8 +3696,13 @@ async function verifyBackgroundBookmarkFlows() {
     0
   );
   assert.equal(browserMoveHarness.state.favorites[0].category, 'Learning');
-  assert.equal(browserMoveHarness.state.favoriteOrder.Tools, undefined);
-  assert.deepEqual(Array.from(browserMoveHarness.state.favoriteOrder.Learning), [browserMoveUrl]);
+  const movedToolsFolder = browserMoveHarness.state.folders.find((folder) => folder.name === 'Tools');
+  const movedLearningFolder = browserMoveHarness.state.folders.find((folder) => folder.name === 'Learning');
+  assert.deepEqual(Array.from(browserMoveHarness.state.favoriteOrder[movedToolsFolder.id]), []);
+  assert.deepEqual(
+    Array.from(browserMoveHarness.state.favoriteOrder[movedLearningFolder.id]),
+    [browserMoveHarness.state.favorites[0].id]
+  );
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.type, 'moved');
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.previousCategory, 'Tools');
   assert.equal(browserMoveHarness.state.pendingBrowserActivity.category, 'Learning');
@@ -3091,7 +3738,7 @@ async function verifyBackgroundBookmarkFlows() {
   assert.equal(recoveryResult.status, 'ok');
   assert.equal(recoveryResult.total, 2);
   assert.equal(recoveryResult.recovered, 2);
-  assert.equal(recoveryResult.categoriesAdded, 1);
+  assert.equal(recoveryResult.foldersRecovered, 1);
   assert.equal(recoveryHarness.state.favorites.length, 2);
   assert.equal(
     recoveryHarness.state.favorites.find(
@@ -3105,7 +3752,7 @@ async function verifyBackgroundBookmarkFlows() {
     ).category,
     'Research'
   );
-  assert.ok(recoveryHarness.state.settings.categories.includes('Research'));
+  assert.ok(recoveryHarness.state.folders.some((folder) => folder.name === 'Research'));
   assert.equal(recoveryHarness.bookmarks.nodes.get(legacyCourse.id).parentId, legacyLearning.id);
   assert.equal(recoveryHarness.bookmarks.nodes.get(legacyPaper.id).parentId, legacyCustom.id);
   const repeatedRecovery = await sendBackgroundMessage(
@@ -3718,6 +4365,8 @@ async function main() {
   verifyManifestAndLocales();
   verifyManualOrdering();
   verifyBilingualClassification();
+  verifyFolderTreeAndAIOrganization();
+  await verifyMigrationSafetySnapshot();
   await verifyAIProtocols();
   verifyAIKeywordSuggestions();
   await verifyBookmarkModes();
@@ -3728,11 +4377,13 @@ async function main() {
   await verifyBookmarkGuard();
   await verifyFavoritesServiceDependencyInjection();
   await verifyBackgroundMessageRoutes();
+  await verifyMultilevelBrowserSync();
   await verifyBackgroundBookmarkFlows();
   await verifySaveFavoriteConsistency();
   await verifyCrossEntryConsistency();
   await verifyStorageWriteFailures();
   await verifyInternalMarkPersistence();
+  await verifySubfolderSafetyRegressions();
   assert.deepEqual(
     [...exercisedBackgroundMessageTypes].sort(),
     BACKGROUND_MESSAGE_TYPES.slice().sort(),

@@ -518,6 +518,158 @@
     };
   }
 
+  // 多级收藏夹分类：folderId 是稳定身份，名称与父级关键词只用于评分。
+  // 父级语义按每层 0.35 衰减；直接规则、域名规则和更深路径优先。
+  function classifyFolders(tabInfo, settings = {}, folderInput = []) {
+    const folders = (Array.isArray(folderInput) ? folderInput : [])
+      .filter((folder) => folder && folder.id && folder.name);
+    if (!folders.length) {
+      const legacy = classify(tabInfo, settings);
+      return { ...legacy, folderId: '', folderPath: legacy.category };
+    }
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    const language = String(settings.language || 'zh_CN').toLowerCase().startsWith('zh')
+      ? 'zh_CN'
+      : 'en';
+    const weights = normalizeWeights(settings.classificationWeights);
+    const method = settings.classificationMode === 'vector' ? 'vector' : 'weighted';
+    const fields = [
+      { value: normalize(tabInfo.title), weight: weights.title },
+      {
+        value: normalize(Array.isArray(tabInfo.keywords) ? tabInfo.keywords.join(' ') : tabInfo.keywords),
+        weight: weights.keywords
+      },
+      { value: normalize(tabInfo.url), weight: weights.url },
+      { value: normalize(tabInfo.description), weight: weights.description }
+    ];
+    const hostname = normalizeDomain(tabInfo.url);
+
+    function pathFor(folder) {
+      const path = [];
+      const visited = new Set();
+      let current = folder;
+      while (current && !visited.has(current.id)) {
+        path.unshift(current);
+        visited.add(current.id);
+        current = current.parentId ? byId.get(current.parentId) : null;
+      }
+      return path;
+    }
+
+    const details = new Map();
+    folders.forEach((folder) => {
+      const path = pathFor(folder);
+      const rules = [];
+      path.forEach((segment, index) => {
+        const distance = path.length - index - 1;
+        const inheritedWeight = distance === 0 ? 1 : Math.pow(0.35, distance);
+        rules.push({ value: segment.name, weight: inheritedWeight * 1.25, direct: distance === 0 });
+        (Array.isArray(segment.keywords) ? segment.keywords : []).forEach((keyword) => {
+          rules.push({ value: keyword, weight: inheritedWeight, direct: distance === 0 });
+        });
+      });
+      details.set(folder.id, { folder, path, rules });
+    });
+
+    const scores = {};
+    const matches = {};
+    const matchedDomains = {};
+    const pageVector = createPageVector(tabInfo, weights);
+    folders.forEach((folder) => {
+      const detail = details.get(folder.id);
+      let weightedScore = 0;
+      const matched = [];
+      let matchedDomain = '';
+      detail.rules.forEach((rule) => {
+        const keyword = normalize(rule.value);
+        if (!keyword) return;
+        const domain = parseDomainRule(keyword);
+        if (domain) {
+          if (domainMatches(hostname, domain)) {
+            const domainScore = 1000 * rule.weight * (rule.direct ? 1.2 : 1);
+            if (domainScore > weightedScore) weightedScore = domainScore;
+            matchedDomain = domain;
+          }
+          return;
+        }
+        fields.forEach((field) => {
+          const occurrences = countOccurrences(field.value, keyword);
+          if (!occurrences) return;
+          weightedScore += occurrences * field.weight * Math.min(keyword.length, 5) * rule.weight;
+          if (!matched.includes(keyword)) matched.push(keyword);
+        });
+      });
+      if (method === 'vector') {
+        const vector = new Map();
+        detail.rules.forEach((rule) => {
+          if (!isDomainRule(rule.value)) addToVector(vector, rule.value, rule.weight);
+        });
+        scores[folder.id] = Math.round(cosineSimilarity(pageVector, vector) * 1000) / 10;
+        if (matchedDomain) scores[folder.id] = Math.max(scores[folder.id], 1000);
+      } else {
+        scores[folder.id] = Math.round(weightedScore * 100) / 100;
+      }
+      matches[folder.id] = matched;
+      matchedDomains[folder.id] = matchedDomain;
+    });
+
+    const preferredFallback = language === 'zh_CN' ? '其他' : 'Other';
+    const roots = folders.filter((folder) => !folder.parentId);
+    const fallback = roots.find((folder) => folder.name === preferredFallback)
+      || roots[roots.length - 1]
+      || folders[folders.length - 1];
+    const ranked = [...folders].sort((left, right) => {
+      const scoreDifference = (scores[right.id] || 0) - (scores[left.id] || 0);
+      if (scoreDifference) return scoreDifference;
+      const directDifference = matches[right.id].length - matches[left.id].length;
+      if (directDifference) return directDifference;
+      return details.get(right.id).path.length - details.get(left.id).path.length;
+    });
+    const minimumScore = method === 'vector' ? 4 : 0;
+    const winner = ranked[0] && scores[ranked[0].id] > minimumScore ? ranked[0] : fallback;
+    const winnerId = winner ? winner.id : '';
+    const tags = matchedDomains[winnerId]
+      ? [matchedDomains[winnerId]]
+      : (matches[winnerId] || []).slice(0, 4);
+    const folderPath = winnerId
+      ? details.get(winnerId).path.map((folder) => folder.name).join(' › ')
+      : '';
+    const confidence = calculateConfidence({
+      category: winnerId,
+      fallback: fallback && fallback.id,
+      method,
+      score: scores[winnerId] || 0,
+      scores,
+      tags,
+      domainMatch: matchedDomains[winnerId] ? { domain: matchedDomains[winnerId] } : null
+    });
+    return {
+      category: folderPath,
+      folderId: winnerId,
+      folderPath,
+      tags,
+      score: scores[winnerId] || 0,
+      scores,
+      scoreRatios: scoreRatios(scores),
+      method,
+      weights,
+      confidence,
+      matchType: matchedDomains[winnerId] ? 'domain' : 'keywords',
+      source: 'local',
+      summary: matchedDomains[winnerId]
+        ? (language === 'zh_CN'
+          ? `根据已记住的域名规则“${matchedDomains[winnerId]}”归类到“${folderPath}”`
+          : `Classified into “${folderPath}” by the remembered domain rule “${matchedDomains[winnerId]}”`)
+        : tags.length
+          ? (language === 'zh_CN'
+            ? `匹配到 ${tags.map((tag) => `“${tag}”`).join('、')}`
+            : `Matched ${tags.map((tag) => `“${tag}”`).join(', ')}`)
+          : (language === 'zh_CN'
+            ? '暂未找到明确关键词，可手动调整分类'
+            : 'No clear keyword match. You can adjust the folder.')
+    };
+  }
+
   function rulesToText(categories, rules, language = 'zh_CN') {
     const merged = mergeRules(categories, rules, language);
     return categories
@@ -545,6 +697,7 @@
     getDefaults,
     buildKeywordIndex,
     classify,
+    classifyFolders,
     normalizeDomain,
     parseDomainRule,
     createDomainLearningProposal,

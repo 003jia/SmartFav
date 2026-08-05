@@ -2,11 +2,15 @@
 // 扩展 worker 通过 globalScope.SmartFavStateStore 使用，Node 测试通过 require 使用。
 (function attachStateStore(globalScope) {
   const STATE_KEYS = Object.freeze([
+    'folderSchemaVersion',
+    'folderMigrationBackup',
+    'folders',
     'settings',
     'favorites',
     'favoriteOrder',
     'recentlyDeleted',
     'bookmarkRestorePoints',
+    'aiOrganizationPreviews',
     'pendingBrowserActivity'
   ]);
 
@@ -31,6 +35,13 @@
   function normalizeStoredState(result) {
     const safeResult = result || {};
     return {
+      folderSchemaVersion: Number(safeResult.folderSchemaVersion) || 0,
+      folderMigrationBackup: safeResult.folderMigrationBackup
+        && typeof safeResult.folderMigrationBackup === 'object'
+        && !Array.isArray(safeResult.folderMigrationBackup)
+        ? safeResult.folderMigrationBackup
+        : null,
+      folders: Array.isArray(safeResult.folders) ? safeResult.folders : [],
       settings: safeResult.settings
         && typeof safeResult.settings === 'object'
         && !Array.isArray(safeResult.settings)
@@ -47,6 +58,9 @@
         : [],
       bookmarkRestorePoints: Array.isArray(safeResult.bookmarkRestorePoints)
         ? safeResult.bookmarkRestorePoints
+        : [],
+      aiOrganizationPreviews: Array.isArray(safeResult.aiOrganizationPreviews)
+        ? safeResult.aiOrganizationPreviews
         : [],
       pendingBrowserActivity: safeResult.pendingBrowserActivity || null
     };

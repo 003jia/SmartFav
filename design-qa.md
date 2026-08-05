@@ -1,5 +1,43 @@
 # SmartFav browser popup design QA
 
+## Version 1.15.1 category-folder drop preview
+
+- source visual truth: user-provided category-folder drag reference, reviewed locally and intentionally excluded from the public repository
+- implementation screenshot: local browser-rendered comparison, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewport: 360 × 560 CSS px, device density 1
+- source pixels: 686 × 648; implementation focused crop: 360 × 310
+- state: light glass theme, Favorites category grid, last folder being moved toward the top edge of the second folder
+
+### Full-view and focused comparison evidence
+
+The source and implementation were opened together after matching the active drag state. The reference establishes the desired thin blue horizontal insertion line used by bookmark rows. The category grid keeps the same compact two-column layout, fades the dragged source card, highlights the target, and now shows exactly one blue guide on the edge nearest the pointer. No numbered badge remains. Separate rendered checks covered top, bottom, left, and right; the focused category crop was sufficient because all affected cards, grips, counts, and edge feedback remain legible.
+
+### Required fidelity surfaces
+
+- Fonts and typography: existing system-font family, card-name weight, count size, line height, truncation, and search-field copy are unchanged; no new visible text or number is introduced by the drop preview.
+- Spacing and layout rhythm: the 8 px grid gap and 48 px card height are preserved. The 3 px guide occupies the existing gap and the target shifts only 3 px during preview, so no layout reflow or horizontal overflow is introduced.
+- Colors and visual tokens: all four guides, the target border, and focus halo reuse `--primary`, `--primary-soft`, and `--focus-ring`; no new hard-coded theme surface was introduced.
+- Image quality and asset fidelity: this interaction contains no raster imagery or non-standard icon asset. Existing bookmark icon assets are unaffected.
+- Copy and content: folder names and favorite counts remain unchanged. Screen-reader status announces the dragged folder and its predicted final position in both Chinese and English.
+
+### Findings and comparison history
+
+- Initial finding (P2): the first iteration distinguished only before/after with left/right guides and added a numeric badge, but the requested behavior is a four-edge guide matching the bookmark-row horizontal insertion line without a number.
+- Fix: removed the badge and `data-drop-position`, split the target into nearest-edge top/bottom/left/right hit zones, mapped top/left to before and bottom/right to after, and added matching horizontal or vertical guides.
+- Post-fix evidence: top and bottom resolve to 146 × 3 px guides; left and right resolve to 3 × 36 px guides. All four use the primary blue token, no numeric drop badge exists, document width equals client width at 360 px, and no framework overlay or console warning/error is present.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for this focused interaction.
+
+### Interaction checks
+
+- Page identity: `SmartFav`, Favorites view, local 1.15.1 source.
+- Visual preview: screenshots used a temporary local QA state to render the top, bottom, left, and right edge states independently. That fixture was removed from the formal source before packaging, so no folder is highlighted by default.
+- Real reorder path: keyboard `Alt + ArrowLeft` moved `项目资料` from position 7 to position 6, restored focus to the moved card, and announced `“项目资料”已移动到第 6 位`.
+- DOM/content: all seven folder cards remain present, counts remain readable, and document width is 360/360 with no horizontal overflow.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
 ## Version 1.8.0 navigation, sizing, trash, and background
 
 Browser verification at the native 360 × 560 popup size confirmed that the

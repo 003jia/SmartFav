@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SmartFav</title>
-  <link rel="stylesheet" href="styles/popup.css?v=1.14.5">
+  <link rel="stylesheet" href="styles/popup.css?v=1.15.1">
 </head>
 <body>
   <div class="app-shell">
@@ -38,6 +38,7 @@
       <section id="errorStatus" class="notice notice-error hidden" aria-live="polite">
         <span class="status-dot" aria-hidden="true"></span>
         <span id="errorMsg" data-i18n="unsupportedPage">当前页面暂时无法收藏</span>
+        <button id="retryBootstrapBtn" class="notice-action hidden" type="button" data-i18n="retryLoad">重新加载</button>
       </section>
 
       <section id="categorySection" class="save-card hidden" aria-labelledby="saveTitle">
@@ -57,9 +58,26 @@
           </span>
         </div>
 
-        <label class="select-wrap" for="categorySelect">
-          <select id="categorySelect" data-i18n-aria-label="selectCategory" aria-label="选择收藏分类"></select>
-        </label>
+        <div class="select-wrap" id="categorySelectControl">
+          <select id="categorySelect" class="native-category-select" tabindex="-1" aria-hidden="true"></select>
+          <button
+            id="categorySelectButton"
+            class="category-select-button"
+            type="button"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="categorySelectMenu"
+            data-i18n-aria-label="selectCategory"
+            aria-label="选择收藏分类"
+          >
+            <span id="categorySelectValue"></span>
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="m6 8 4 4 4-4"></path>
+            </svg>
+          </button>
+          <div id="categorySelectMenu" class="category-select-menu hidden" role="listbox"></div>
+        </div>
         <p id="categorySummary" class="match-summary">正在查找匹配关键词</p>
         <div id="tagsContainer" class="tags" data-i18n-aria-label="matchedKeywords" aria-label="匹配到的关键词"></div>
 
@@ -150,7 +168,25 @@
           <h2 id="foldersTitle" data-i18n="favoriteCategories">收藏分类</h2>
           <span id="totalCount" class="total-count">0 条</span>
         </div>
+        <div class="search-bar">
+          <input type="search" id="favoritesSearchInput" data-i18n-placeholder="searchFavoritesPlaceholder" placeholder="搜索收藏…" autocomplete="off">
+          <button class="search-clear-btn hidden" id="favoritesSearchClear" type="button" data-i18n-aria-label="clearSearch" aria-label="清空搜索">×</button>
+        </div>
         <div class="folders-list" id="foldersList"></div>
+        <div class="empty-state hidden" id="favoritesEmptyState">
+          <div class="empty-state-icon">📭</div>
+          <div class="empty-state-title" data-i18n="emptyFavorites">还没有收藏</div>
+          <div class="empty-state-hint" data-i18n="emptyFavoritesHint">去首页添加一个收藏吧</div>
+          <button class="button button-secondary" id="favoritesEmptyAction" type="button" data-i18n="goToHome">去首页</button>
+        </div>
+        <!-- 搜索无结果和"一条收藏都没有"是两种状态，各用一个静态块，
+             避免动态改写文案后被 applyLanguage() 重置。 -->
+        <div class="empty-state hidden" id="favoritesNoResults">
+          <div class="empty-state-icon">🔍</div>
+          <div class="empty-state-title" data-i18n="noSearchResults">没有匹配的结果</div>
+          <div class="empty-state-hint" data-i18n="noSearchResultsHint">试试换个关键词，或清空搜索</div>
+          <button class="button button-secondary" id="favoritesNoResultsAction" type="button" data-i18n="clearSearch">清空搜索</button>
+        </div>
       </section>
       <p id="favoritesReorderStatus" class="visually-hidden" role="status" aria-live="polite"></p>
     </section>
@@ -194,7 +230,42 @@
             data-i18n="aiKeywordAnalyze"
           >AI 分析并填入</button>
         </div>
+        <div class="category-ai-assistant category-ai-organizer">
+          <div class="category-ai-copy">
+            <strong data-i18n="aiOrganizationTitle">AI 整理建议</strong>
+            <p id="aiOrganizationHint" data-i18n="aiOrganizationHint">只分析每个文件夹最多 12 条代表性收藏。移动、新建子文件夹和补充关键词都需要你勾选确认。</p>
+          </div>
+          <button
+            id="aiOrganizationAnalyzeBtn"
+            type="button"
+            aria-describedby="aiOrganizationHint"
+            data-i18n="aiOrganizationAnalyze"
+          >生成整理建议</button>
+        </div>
+        <section id="aiOrganizationPreview" class="ai-organization-preview hidden" aria-labelledby="aiOrganizationPreviewTitle">
+          <div class="ai-organization-preview-heading">
+            <strong id="aiOrganizationPreviewTitle" data-i18n="aiOrganizationPreviewTitle">待确认的整理建议</strong>
+            <span id="aiOrganizationPreviewSummary"></span>
+          </div>
+          <div id="aiOrganizationOperations" class="ai-organization-operations"></div>
+          <button id="aiOrganizationApplyBtn" type="button" data-i18n="aiOrganizationApply">应用已选建议</button>
+        </section>
+        <div class="search-bar">
+          <input type="search" id="categoriesSearchInput" data-i18n-placeholder="searchCategoriesPlaceholder" placeholder="搜索分类…" autocomplete="off">
+          <button class="search-clear-btn hidden" id="categoriesSearchClear" type="button" data-i18n-aria-label="clearSearch" aria-label="清空搜索">×</button>
+        </div>
         <div id="categoryRulesList" class="category-rules-list"></div>
+        <div class="empty-state hidden" id="categoriesEmptyState">
+          <div class="empty-state-icon">🗂️</div>
+          <div class="empty-state-title" data-i18n="emptyCategories">还没有分类文件夹</div>
+          <div class="empty-state-hint" data-i18n="emptyCategoriesHint">在上方输入名称即可新建一个</div>
+        </div>
+        <div class="empty-state hidden" id="categoriesNoResults">
+          <div class="empty-state-icon">🔍</div>
+          <div class="empty-state-title" data-i18n="noSearchResults">没有匹配的结果</div>
+          <div class="empty-state-hint" data-i18n="noSearchResultsHint">试试换个关键词，或清空搜索</div>
+          <button class="button button-secondary" id="categoriesNoResultsAction" type="button" data-i18n="clearSearch">清空搜索</button>
+        </div>
       </div>
 
       <div id="categorySettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
@@ -216,6 +287,11 @@
       </div>
       <div id="trashStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
       <div id="trashList" class="trash-list"></div>
+      <div class="empty-state hidden" id="trashEmptyState">
+        <div class="empty-state-icon">🗑️</div>
+        <div class="empty-state-title" data-i18n="emptyTrash">回收站为空</div>
+        <div class="empty-state-hint" data-i18n="emptyTrashHint">删除的收藏会出现在这里</div>
+      </div>
     </section>
 
     <section id="settingsView" class="settings-view hidden" aria-labelledby="compactSettingsTitle">
@@ -224,6 +300,14 @@
         <p data-i18n="settingsIntro">本地关键词分类始终开启，AI 和浏览器收藏同步均按需使用。</p>
       </div>
 
+      <!-- ── 分组 1：外观（默认展开） ── -->
+      <div class="settings-group" data-group="appearance">
+        <button class="settings-group-header" type="button" aria-expanded="true">
+          <span class="settings-group-title" data-i18n="settingsGroupAppearance">外观</span>
+          <span class="settings-group-summary" data-summary="appearance"></span>
+          <svg class="settings-group-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        </button>
+        <div class="settings-group-body" aria-hidden="false">
       <div class="appearance-fields">
         <label class="compact-field" for="compactThemeStyle">
           <span data-i18n="appearanceStyle">界面风格</span>
@@ -287,7 +371,17 @@
           </div>
         </div>
       </div>
+        </div>
+      </div>
 
+      <!-- ── 分组 2：AI 增强（默认折叠） ── -->
+      <div class="settings-group collapsed" data-group="ai">
+        <button class="settings-group-header" type="button" aria-expanded="false">
+          <span class="settings-group-title" data-i18n="settingsGroupAI">AI 增强</span>
+          <span class="settings-group-summary" data-summary="ai"></span>
+          <svg class="settings-group-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        </button>
+        <div class="settings-group-body" aria-hidden="true" inert>
       <label class="compact-toggle" for="compactAiEnabled">
         <span>
           <strong data-i18n="aiEnhance">AI 增强</strong>
@@ -369,7 +463,17 @@
 
         <button class="compact-test-button" id="compactTestBtn" type="button" data-i18n="testConnection">测试连接</button>
       </div>
+        </div>
+      </div>
 
+      <!-- ── 分组 3：浏览器书签同步（默认折叠） ── -->
+      <div class="settings-group collapsed" data-group="bookmarks">
+        <button class="settings-group-header" type="button" aria-expanded="false">
+          <span class="settings-group-title" data-i18n="settingsGroupBookmarks">浏览器书签同步</span>
+          <span class="settings-group-summary" data-summary="bookmarks"></span>
+          <svg class="settings-group-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        </button>
+        <div class="settings-group-body" aria-hidden="true" inert>
       <label class="compact-toggle" for="compactBrowserBookmarksEnabled">
         <span>
           <strong data-i18n="browserBookmarks">同步浏览器收藏夹</strong>
@@ -405,7 +509,17 @@
         <button class="compact-test-button" id="compactOrganizeBtn" type="button" data-i18n="organizeNow">立即整理收藏夹</button>
         <p class="compact-note" data-i18n="browserFolderNote">整理只移动网址收藏，不删除内容；SmartFav 文件夹内的记录不会重复处理。</p>
       </div>
+        </div>
+      </div>
 
+      <!-- ── 分组 4：备份与恢复（默认折叠） ── -->
+      <div class="settings-group collapsed" data-group="backup">
+        <button class="settings-group-header" type="button" aria-expanded="false">
+          <span class="settings-group-title" data-i18n="settingsGroupBackup">备份与恢复</span>
+          <span class="settings-group-summary" data-summary="backup"></span>
+          <svg class="settings-group-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+        </button>
+        <div class="settings-group-body" aria-hidden="true" inert>
       <section class="bookmark-backup-panel" aria-labelledby="bookmarkBackupTitle">
         <div class="bookmark-backup-heading">
           <span>
@@ -430,18 +544,22 @@
         <div id="bookmarkBackupStatus" class="bookmark-backup-status" role="status" aria-live="polite"></div>
         <p class="bookmark-backup-warning" data-i18n="bookmarkRestoreUninstallWarning">浏览器不允许扩展在卸载后自动还原。卸载前请手动还原，或导出 JSON 布局备份。</p>
       </section>
+        </div>
+      </div>
 
       <div id="compactSettingsStatus" class="compact-settings-status" role="status" aria-live="polite"></div>
     </section>
   </div>
 
-  <script src="constants.js?v=1.14.5"></script>
-  <script src="i18n.js?v=1.14.5"></script>
-  <script src="classifier.js?v=1.14.5"></script>
-  <script src="browser-bookmarks.js?v=1.14.5"></script>
-  <script src="ai-client.js?v=1.14.5"></script>
-  <script src="ai-keyword-suggestions.js?v=1.14.5"></script>
-  <script src="order-utils.js?v=1.14.5"></script>
-  <script src="popup.js?v=1.14.5"></script>
+  <script src="constants.js?v=1.15.1"></script>
+  <script src="folder-tree.js?v=1.15.1"></script>
+  <script src="ai-organization.js?v=1.15.1"></script>
+  <script src="i18n.js?v=1.15.1"></script>
+  <script src="classifier.js?v=1.15.1"></script>
+  <script src="browser-bookmarks.js?v=1.15.1"></script>
+  <script src="ai-client.js?v=1.15.1"></script>
+  <script src="ai-keyword-suggestions.js?v=1.15.1"></script>
+  <script src="order-utils.js?v=1.15.1"></script>
+  <script src="popup.js?v=1.15.1"></script>
 </body>
 </html>
