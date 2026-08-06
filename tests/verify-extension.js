@@ -26,6 +26,7 @@ const favoritesServiceJs = fs.readFileSync(
 
 const classifier = require(path.join(extensionRoot, 'classifier.js'));
 const folderTree = require(path.join(extensionRoot, 'folder-tree.js'));
+const folderNav = require(path.join(extensionRoot, 'folder-nav.js'));
 const aiOrganization = require(path.join(extensionRoot, 'ai-organization.js'));
 const i18n = require(path.join(extensionRoot, 'i18n.js'));
 const browserBookmarks = require(path.join(extensionRoot, 'browser-bookmarks.js'));
@@ -145,9 +146,29 @@ function verifyManifestAndLocales() {
   assert.match(popupHtml, /id="modeBtn"/);
   assert.doesNotMatch(popupHtml, /id="embeddedCloseBtn"/);
   assert.match(popupHtml, /id="compactThemeStyle"/);
+  [
+    'compactThemeStyle',
+    'compactProvider',
+    'compactClassificationMode',
+    'compactBookmarkWriteMode'
+  ].forEach((selectId) => {
+    assert.match(
+      popupHtml,
+      new RegExp(`id="${selectId}"[^>]*class="settings-native-select"`)
+    );
+    assert.match(
+      popupHtml,
+      new RegExp(`id="${selectId}Button"[^>]*role="combobox"`)
+    );
+    assert.match(
+      popupHtml,
+      new RegExp(`id="${selectId}Menu"[^>]*role="listbox"`)
+    );
+  });
   assert.match(popupHtml, /id="categorySelectButton"[\s\S]*?role="combobox"/);
   assert.match(popupHtml, /id="categorySelectMenu"[^>]*role="listbox"/);
   assert.match(popupHtml, /id="compactNewCategory"/);
+  assert.match(popupHtml, /id="categoryCreateStatus"[^>]*role="status"/);
   assert.match(popupHtml, /id="compactAddCategoryBtn"/);
   assert.match(popupHtml, /id="categoryRulesList"/);
   assert.match(popupHtml, /id="categoryKeywordAiAnalyzeBtn"/);
@@ -351,6 +372,30 @@ function verifyManifestAndLocales() {
   assert.match(popupJs, /class="favorite-delete-button"/);
   assert.match(popupJs, /class="favorite-move-select"/);
   assert.match(popupJs, /sendRuntimeMessage\('moveFavorite'/);
+  assert.match(popupJs, /function initDynamicThemedSelectControls\(container\)/);
+  assert.match(popupHtml, /id="folderPickerView"[\s\S]{0,120}aria-labelledby="folderPickerTitle"/);
+  assert.match(popupHtml, /id="folderPickerSearchInput"/);
+  assert.match(popupHtml, /id="folderPickerBreadcrumb"/);
+  assert.match(popupHtml, /id="folderPickerList"[\s\S]{0,80}role="list"/);
+  assert.match(popupJs, /function openFolderDestinationPicker\(controlOrSelect\)/);
+  assert.match(popupJs, /function renderFolderDestinationPicker\(\)/);
+  assert.match(popupJs, /function closeFolderDestinationPicker\(/);
+  assert.match(popupJs, /button\.addEventListener\('click', \(\) => openFolderDestinationPicker\(control\)\)/);
+  assert.match(popupJs, /setPrimaryViewVisibility\(activeView\)/);
+  assert.match(popupCss, /\.folder-picker-view\s*\{/);
+  assert.match(popupCss, /\.folder-picker-list\s*\{/);
+  assert.match(popupCss, /\.folder-picker-row\.is-selected \.folder-picker-check/);
+  assert.match(popupJs, /select\.favorite-move-select/);
+  assert.match(popupJs, /select\.category-parent-select/);
+  assert.match(popupJs, /select\.category-delete-target/);
+  assert.match(
+    popupJs,
+    /<option value="" disabled>\$\{escapeHtml\(t\('chooseFolder'\)\)\}<\/option>/
+  );
+  assert.match(popupJs, /function selectDynamicThemedSelectValue\(/);
+  assert.match(popupJs, /parts\.select\.dispatchEvent\(new Event\('change', \{ bubbles: true \}\)\)/);
+  assert.match(popupJs, /menu\.setAttribute\('aria-labelledby', button\.id\)/);
+  assert.match(popupJs, /syncDynamicThemedSelect\(event\.target\)/);
   assert.match(popupJs, /function buildFolderDomainLearningProposal\(/);
   assert.match(popupJs, /function createFolderLearningResult\(/);
   assert.match(popupJs, /elements\.pageLearningCheckbox\.checked = !isFallback/);
@@ -410,7 +455,8 @@ function verifyManifestAndLocales() {
   // （本地没有记录，删除既不可追溯也无法恢复）。
   assert.match(favoritesServiceJs, /if \(settings\.bookmarkWriteMode !== 'add' && shouldCapture\)/);
   assert.match(popupJs, /chrome\.tabs\.update\(activeTab\.id, \{ url \}/);
-  assert.match(popupJs, /t\('backToCategories'\)/);
+  // P3 合并后返回按钮已移除（面包屑覆盖导航），改为验证统一面包屑原语已接入。
+  assert.match(popupJs, /SmartFavFolderNav\.renderBreadcrumb/);
   assert.match(
     i18n.MESSAGES.zh_CN.browserFolderNote,
     /不删除内容/
@@ -432,7 +478,24 @@ function verifyManifestAndLocales() {
   assert.match(popupCss, /\.content-back-button\s*\{/);
   assert.match(popupCss, /\.view-back-row\s*\{[^}]*position:\s*sticky;[^}]*top:\s*0;/s);
   assert.match(popupCss, /\.search-bar\s*\{[^}]*top:\s*var\(--view-back-row-height\);/s);
+  assert.match(popupCss, /\.search-bar\s*\{[^}]*background:\s*var\(--search-bar-bg\);/s);
+  assert.match(popupCss, /\.search-bar input\s*\{[^}]*background:\s*var\(--search-input-bg\);/s);
+  assert.match(popupCss, /\.category-create-status:empty\s*\{[^}]*display:\s*none;/s);
   assert.match(popupCss, /\.category-select-menu\s*\{[^}]*top:\s*calc\(100% \+ 5px\);/s);
+  assert.match(popupCss, /\.themed-native-select\s*\{[^}]*display:\s*none !important;/s);
+  assert.match(popupCss, /\.themed-select-menu\s*\{[^}]*background:\s*var\(--settings-menu-bg\);/s);
+  assert.match(popupCss, /\.themed-select-option\[aria-selected="true"\]\s*\{/);
+  assert.match(popupCss, /\.themed-select-control-favorite \.themed-select-menu\s*\{[^}]*width:\s*184px;/s);
+  assert.match(
+    popupCss,
+    /\.category-rule-item \.themed-select-control-compact\.is-open \.themed-select-menu[\s\S]{0,260}position:\s*relative;[\s\S]{0,260}width:\s*100%;/
+  );
+  assert.match(popupJs, /const opensInsideCategoryCard = parts\.control\.classList\.contains\(/);
+  assert.match(popupCss, /\.favorite-row-card\.has-open-themed-select\s*\{[^}]*overflow:\s*visible;/s);
+  assert.match(popupCss, /\.settings-native-select\s*\{[^}]*display:\s*none;/s);
+  assert.match(popupCss, /\.settings-select-menu\s*\{[^}]*background:\s*var\(--settings-menu-bg\);/s);
+  assert.match(popupCss, /\.settings-select-option\[aria-selected="true"\]\s*\{/);
+  assert.match(popupCss, /\.settings-group\.has-open-settings-select/);
   assert.match(popupCss, /\.save-card\.has-open-select\s*\{[^}]*z-index:\s*40;/s);
   assert.match(popupCss, /\.settings-group-header\s*\{[^}]*padding:\s*10px 14px;/s);
   assert.match(popupCss, /\.background-image-field\s*\{/);
@@ -459,6 +522,13 @@ function verifyManifestAndLocales() {
   assert.doesNotMatch(popupJs, /dataset\.dropPosition/);
   assert.match(popupJs, /function getGridDropDirection\(event, target\)/);
   assert.match(popupJs, /function getGridDropPlacement\(direction\)/);
+  assert.match(popupJs, /const SETTINGS_SELECT_IDS = \[/);
+  assert.match(popupJs, /function initSettingsSelectControls\(\)/);
+  assert.match(popupJs, /function showCategoryCreateStatus\(/);
+  assert.match(popupJs, /showCategoryCreateStatus\(t\('categoryCreated', \{ name \}\), 'success'\)/);
+  assert.doesNotMatch(popupJs, /newRuleInput\.focus/);
+  assert.match(popupJs, /function setSettingsSelectOpen\(/);
+  assert.match(popupJs, /select\.dispatchEvent\(new Event\('change', \{ bubbles: true \}\)\)/);
   assert.match(popupJs, /target\.classList\.add\(`is-drop-\$\{direction\}`\)/);
   assert.match(popupJs, /t\('folderDropPreview'/);
   assert.doesNotMatch(popupJs, /applyFolderDropPreviewFixture/);
@@ -4361,6 +4431,72 @@ async function verifyBackgroundBookmarkFlows() {
   assert.equal(internalDeleteHarness.errors.length, 0);
 }
 
+// folder-nav.js 纯函数测试：面包屑渲染 + 跨层搜索解析。
+// 这是 popup 侧唯一能进 vm harness 的单测，所以覆盖要实。
+function verifyFolderNav() {
+  assert.equal(folderNav.escapeHtml('<a&"b\'c>'), '&lt;a&amp;&quot;b&#39;c&gt;', 'escapeHtml covers all five entities');
+
+  const folders = folderTree.normalizeFolders([
+    { id: 'work', parentId: null, name: '工作' },
+    { id: 'clients', parentId: 'work', name: '客户' },
+    { id: 'acme', parentId: 'clients', name: 'ACME <Co>' },
+    { id: 'personal', parentId: null, name: '个人' }
+  ]);
+
+  // renderBreadcrumb：根层级只有根按钮
+  const rootNav = folderNav.renderBreadcrumb(folders, null, { rootLabel: '收藏分类', dataAttr: 'data-folder-id' });
+  assert.ok(rootNav.includes('data-folder-id=""'), 'root breadcrumb button has empty data-folder-id');
+  assert.ok(!rootNav.includes('›'), 'root breadcrumb has no path separators');
+  assert.ok(rootNav.includes('收藏分类'), 'root breadcrumb carries rootLabel');
+
+  // renderBreadcrumb：多级路径，每段都是按钮，含自定义 dataAttr
+  const deepNav = folderNav.renderBreadcrumb(folders, 'acme', { rootLabel: '收藏分类', dataAttr: 'data-folder-id' });
+  assert.ok(deepNav.includes('data-folder-id="work"'), 'breadcrumb includes work segment');
+  assert.ok(deepNav.includes('data-folder-id="clients"'), 'breadcrumb includes clients segment');
+  assert.ok(deepNav.includes('data-folder-id="acme"'), 'breadcrumb includes acme segment');
+  // sanitizeFolderName 会剥离 <>，所以这里只能验清洗后的名字；
+  // escapeHtml 本身的覆盖在开头那条单测里。
+  assert.ok(deepNav.includes('ACME Co'), 'breadcrumb carries sanitized folder name');
+
+  // renderBreadcrumb：picker 用 data-folder-picker-parent
+  const pickerNav = folderNav.renderBreadcrumb(folders, 'clients', { rootLabel: 'All', dataAttr: 'data-folder-picker-parent' });
+  assert.ok(pickerNav.includes('data-folder-picker-parent="work"'), 'picker breadcrumb uses its own dataAttr');
+
+  // resolveVisibleFolders：无 query 返回 parentId 的直接子级
+  const rootChildren = folderNav.resolveVisibleFolders(folders, { parentId: null });
+  assert.equal(rootChildren.length, 2, 'root has two direct children');
+  assert.deepEqual(
+    rootChildren.map((r) => r.folder.id).sort(),
+    ['personal', 'work'],
+    'root children are work and personal'
+  );
+  assert.ok(rootChildren.every((r) => r.pathLabel === r.folder.name), 'no-query pathLabel is just the name');
+
+  const workChildren = folderNav.resolveVisibleFolders(folders, { parentId: 'work' });
+  assert.deepEqual(workChildren.map((r) => r.folder.id), ['clients'], 'work has one child: clients');
+
+  // resolveVisibleFolders：有 query 跨层扁平搜索，附带完整路径标签
+  const acmeSearch = folderNav.resolveVisibleFolders(folders, { query: 'acme' });
+  assert.equal(acmeSearch.length, 1, 'search finds ACME across levels');
+  assert.equal(acmeSearch[0].folder.id, 'acme');
+  assert.ok(acmeSearch[0].pathLabel.includes('工作'), 'search result pathLabel includes ancestor 工作');
+  assert.ok(acmeSearch[0].pathLabel.includes('客户'), 'search result pathLabel includes parent 客户');
+
+  // 搜索命中多个、跨不同层级（acme co 含 c；其余是中文名不匹配）
+  const coSearch = folderNav.resolveVisibleFolders(folders, { query: 'c' });
+  assert.equal(coSearch.length, 1, 'query c matches acme co only');
+  assert.ok(coSearch.every((r) => r.folder.name.toLowerCase().includes('c')), 'all results match query');
+
+  // 无命中
+  assert.equal(folderNav.resolveVisibleFolders(folders, { query: 'zzz' }).length, 0, 'no match returns empty');
+
+  // query 仅空白 → 当作无 query（走 childrenOf）
+  const blankQuery = folderNav.resolveVisibleFolders(folders, { parentId: 'work', query: '   ' });
+  assert.deepEqual(blankQuery.map((r) => r.folder.id), ['clients'], 'blank query falls back to direct children');
+
+  console.log('  folder-nav primitives ok');
+}
+
 async function main() {
   verifyManifestAndLocales();
   verifyManualOrdering();
@@ -4384,6 +4520,7 @@ async function main() {
   await verifyStorageWriteFailures();
   await verifyInternalMarkPersistence();
   await verifySubfolderSafetyRegressions();
+  verifyFolderNav();
   assert.deepEqual(
     [...exercisedBackgroundMessageTypes].sort(),
     BACKGROUND_MESSAGE_TYPES.slice().sort(),

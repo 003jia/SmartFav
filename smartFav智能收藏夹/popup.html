@@ -216,6 +216,7 @@
             placeholder="输入新文件夹名称"
           >
           <button id="compactAddCategoryBtn" type="button" data-i18n="addCategory">添加</button>
+          <p id="categoryCreateStatus" class="category-create-status" role="status" aria-live="polite"></p>
         </div>
         <p id="keywordSeparatorHint" class="category-keyword-hint" data-i18n="keywordSeparatorHint">多个关键词请用英文逗号分隔；也支持中文逗号、分号或换行，并会自动转换。</p>
         <div class="category-ai-assistant">
@@ -272,6 +273,38 @@
       <button class="button button-primary category-save" id="categorySaveBtn" type="button" data-i18n="saveAndReclassify">保存并重新分类</button>
     </section>
 
+    <section id="folderPickerView" class="panel-view folder-picker-view hidden" aria-labelledby="folderPickerTitle">
+      <div class="folder-picker-topbar">
+        <button class="folder-picker-back" id="folderPickerBackBtn" type="button" data-i18n-aria-label="back" aria-label="返回">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m12.5 4.5-5 5 5 5"></path>
+          </svg>
+        </button>
+        <h1 id="folderPickerTitle" data-i18n="chooseFolder">选择目标文件夹</h1>
+      </div>
+      <div class="folder-picker-search">
+        <input
+          id="folderPickerSearchInput"
+          type="search"
+          autocomplete="off"
+          data-i18n-placeholder="searchFoldersPlaceholder"
+          data-i18n-aria-label="searchFoldersPlaceholder"
+          placeholder="搜索文件夹…"
+        >
+        <button
+          id="folderPickerSearchClear"
+          class="search-clear-btn hidden"
+          type="button"
+          data-i18n-aria-label="clearSearch"
+          aria-label="清空搜索"
+        >×</button>
+      </div>
+      <nav id="folderPickerBreadcrumb" class="folder-picker-breadcrumb" data-i18n-aria-label="folderPath" aria-label="收藏夹路径"></nav>
+      <p class="folder-picker-hint" data-i18n="folderPickerSelectAndReturn">选择后立即返回</p>
+      <div id="folderPickerList" class="folder-picker-list" role="list" aria-labelledby="folderPickerTitle"></div>
+      <div id="folderPickerEmpty" class="folder-picker-empty hidden" data-i18n="folderPickerEmpty">没有可选的文件夹</div>
+    </section>
+
     <section id="trashView" class="panel-view trash-view hidden" aria-labelledby="trashViewTitle">
       <div class="view-back-row">
         <button class="content-back-button" id="trashBackBtn" type="button">
@@ -309,16 +342,23 @@
         </button>
         <div class="settings-group-body" aria-hidden="false">
       <div class="appearance-fields">
-        <label class="compact-field" for="compactThemeStyle">
-          <span data-i18n="appearanceStyle">界面风格</span>
-          <select id="compactThemeStyle">
-            <option value="glass" data-i18n="styleGlass">毛玻璃（默认）</option>
-            <option value="white" data-i18n="styleWhite">纯白</option>
-            <option value="gray" data-i18n="styleGray">灰色</option>
-            <option value="black" data-i18n="styleBlack">黑色</option>
-            <option value="parchment" data-i18n="styleParchment">羊皮纸</option>
-          </select>
-        </label>
+        <div class="compact-field">
+          <span id="compactThemeStyleLabel" data-i18n="appearanceStyle">界面风格</span>
+          <div id="compactThemeStyleControl" class="settings-select-control" data-settings-select="compactThemeStyle">
+            <select id="compactThemeStyle" class="settings-native-select" tabindex="-1" aria-hidden="true">
+              <option value="glass" data-i18n="styleGlass">毛玻璃（默认）</option>
+              <option value="white" data-i18n="styleWhite">纯白</option>
+              <option value="gray" data-i18n="styleGray">灰色</option>
+              <option value="black" data-i18n="styleBlack">黑色</option>
+              <option value="parchment" data-i18n="styleParchment">羊皮纸</option>
+            </select>
+            <button id="compactThemeStyleButton" class="settings-select-button" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="compactThemeStyleMenu" aria-labelledby="compactThemeStyleLabel compactThemeStyleValue">
+              <span id="compactThemeStyleValue" class="settings-select-value"></span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+            </button>
+            <div id="compactThemeStyleMenu" class="settings-select-menu hidden" role="listbox"></div>
+          </div>
+        </div>
         <label class="appearance-toggle" for="compactDarkMode">
           <span>
             <strong data-i18n="darkMode">暗色模式</strong>
@@ -391,18 +431,25 @@
       </label>
 
       <div id="compactAiFields" class="compact-fields hidden">
-        <label class="compact-field" for="compactProvider">
-          <span data-i18n="aiService">AI 服务</span>
-          <select id="compactProvider">
-            <option value="ollama" data-i18n="ollamaFree">Ollama（本机免费）</option>
-            <option value="openrouter" data-i18n="openrouterFree">OpenRouter 免费路由</option>
-            <option value="minimax">MiniMax</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="openai">OpenAI</option>
-            <option value="openai_compatible" data-i18n="openAICompatibleApi">OpenAI 兼容 API</option>
-            <option value="anthropic_compatible" data-i18n="anthropicCompatibleApi">Anthropic 兼容 API</option>
-          </select>
-        </label>
+        <div class="compact-field">
+          <span id="compactProviderLabel" data-i18n="aiService">AI 服务</span>
+          <div id="compactProviderControl" class="settings-select-control" data-settings-select="compactProvider">
+            <select id="compactProvider" class="settings-native-select" tabindex="-1" aria-hidden="true">
+              <option value="ollama" data-i18n="ollamaFree">Ollama（本机免费）</option>
+              <option value="openrouter" data-i18n="openrouterFree">OpenRouter 免费路由</option>
+              <option value="minimax">MiniMax</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="openai_compatible" data-i18n="openAICompatibleApi">OpenAI 兼容 API</option>
+              <option value="anthropic_compatible" data-i18n="anthropicCompatibleApi">Anthropic 兼容 API</option>
+            </select>
+            <button id="compactProviderButton" class="settings-select-button" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="compactProviderMenu" aria-labelledby="compactProviderLabel compactProviderValue">
+              <span id="compactProviderValue" class="settings-select-value"></span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+            </button>
+            <div id="compactProviderMenu" class="settings-select-menu hidden" role="listbox"></div>
+          </div>
+        </div>
 
         <label class="compact-field hidden" id="compactApiEndpointField" for="compactApiEndpoint">
           <span data-i18n="apiEndpoint">API 地址</span>
@@ -428,13 +475,20 @@
           <input id="compactApiKey" type="password" autocomplete="off" data-i18n-placeholder="apiKeyLocal" placeholder="仅保存在浏览器本地">
         </label>
 
-        <label class="compact-field" for="compactClassificationMode">
-          <span data-i18n="classificationStrategy">分类策略</span>
-          <select id="compactClassificationMode">
-            <option value="weighted" data-i18n="weightedTagMatching">标签比例权重</option>
-            <option value="vector" data-i18n="keywordVectorMatching">关键词向量匹配</option>
-          </select>
-        </label>
+        <div class="compact-field">
+          <span id="compactClassificationModeLabel" data-i18n="classificationStrategy">分类策略</span>
+          <div id="compactClassificationModeControl" class="settings-select-control" data-settings-select="compactClassificationMode">
+            <select id="compactClassificationMode" class="settings-native-select" tabindex="-1" aria-hidden="true">
+              <option value="weighted" data-i18n="weightedTagMatching">标签比例权重</option>
+              <option value="vector" data-i18n="keywordVectorMatching">关键词向量匹配</option>
+            </select>
+            <button id="compactClassificationModeButton" class="settings-select-button" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="compactClassificationModeMenu" aria-labelledby="compactClassificationModeLabel compactClassificationModeValue">
+              <span id="compactClassificationModeValue" class="settings-select-value"></span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+            </button>
+            <div id="compactClassificationModeMenu" class="settings-select-menu hidden" role="listbox"></div>
+          </div>
+        </div>
 
         <label class="compact-range-field ai-weight-field" for="compactKeywordWeight">
           <span>
@@ -483,13 +537,20 @@
       </label>
 
       <div id="compactBookmarkFields" class="compact-fields hidden">
-        <label class="compact-field" for="compactBookmarkWriteMode">
-          <span data-i18n="bookmarkWriteMode">同网址处理方式</span>
-          <select id="compactBookmarkWriteMode">
-            <option value="overwrite" data-i18n="overwriteSameUrl">覆盖同网址</option>
-            <option value="add" data-i18n="alwaysAdd">始终新增</option>
-          </select>
-        </label>
+        <div class="compact-field">
+          <span id="compactBookmarkWriteModeLabel" data-i18n="bookmarkWriteMode">同网址处理方式</span>
+          <div id="compactBookmarkWriteModeControl" class="settings-select-control" data-settings-select="compactBookmarkWriteMode">
+            <select id="compactBookmarkWriteMode" class="settings-native-select" tabindex="-1" aria-hidden="true">
+              <option value="overwrite" data-i18n="overwriteSameUrl">覆盖同网址</option>
+              <option value="add" data-i18n="alwaysAdd">始终新增</option>
+            </select>
+            <button id="compactBookmarkWriteModeButton" class="settings-select-button" type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="compactBookmarkWriteModeMenu" aria-labelledby="compactBookmarkWriteModeLabel compactBookmarkWriteModeValue">
+              <span id="compactBookmarkWriteModeValue" class="settings-select-value"></span>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+            </button>
+            <div id="compactBookmarkWriteModeMenu" class="settings-select-menu hidden" role="listbox"></div>
+          </div>
+        </div>
       </div>
       <label class="compact-toggle" for="compactBookmarkOrganizeEnabled">
         <span>
@@ -553,6 +614,7 @@
 
   <script src="constants.js?v=1.15.1"></script>
   <script src="folder-tree.js?v=1.15.1"></script>
+  <script src="folder-nav.js?v=1.15.1"></script>
   <script src="ai-organization.js?v=1.15.1"></script>
   <script src="i18n.js?v=1.15.1"></script>
   <script src="classifier.js?v=1.15.1"></script>

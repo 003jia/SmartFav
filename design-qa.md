@@ -1,5 +1,235 @@
 # SmartFav browser popup design QA
 
+## Version 1.15.1 dedicated folder destination picker
+
+- source visual truth: local user attachment `codex-clipboard-c45260d9-b333-4b1a-8c3c-8043f9b9fc76.png`, opened locally and intentionally excluded from the public repository
+- implementation screenshot: unavailable; the configured in-app browser rejected the local `127.0.0.1:4173` preview before a rendered capture could be made
+- intended browser viewport: 360 × 560 CSS px, device density 1
+- source pixels: 1135 × 1386 px; the source represents a vertically scrollable compact folder-picker surface rather than a browser window
+- state: Chinese light-glass destination picker opened from a folder move or delete-migration control
+
+### Full-view and focused comparison evidence
+
+The source was opened at original resolution and inspected for hierarchy, spacing, color, icon placement, selection state, and list rhythm. A same-state rendered implementation capture could not be opened, so the required side-by-side comparison and focused-region comparison are blocked. Static code inspection and automated verification are not treated as visual evidence.
+
+### Implemented design mapping
+
+- The former in-card dropdown opens a dedicated picker view with an explicit back action, themed search, path breadcrumb, immediate-return hint, selected-folder check, and separate child-folder navigation target.
+- The picker uses the existing semantic surface, line, text, muted, primary, focus, and custom-background tokens, so glass, solid, black, parchment, dark, and custom-image themes share one component instead of falling back to a white native menu.
+- Search covers allowed folders by both name and full path. Normal browsing is level-by-level; breadcrumbs return to any ancestor. The retained native select remains the business-logic source, and choosing a row dispatches its existing change event after returning to the originating view.
+
+### Findings and comparison history
+
+- [P1] Visual verification is blocked. The local in-app browser rejected the preview URL, so there is no rendered proof for geometry, overflow, glass composition, or interaction state at the target viewport.
+- Code fix completed: removed the overlay-opening path from all three dynamic destination controls and routed favorite move, folder-parent move, and delete migration to the shared dedicated picker.
+- Automated evidence: JavaScript syntax, locale syntax, `git diff --check`, and `node tests/verify-extension.js` pass. These checks cover structure and regression contracts, not visual fidelity.
+- Required follow-up: open the local extension preview or a loaded extension popup, capture the picker at 360 × 560, compare it with the source in the same input, and resolve any P1/P2 differences before changing this result to passed.
+
+final result: blocked
+
+## Version 1.15.1 category-rule dropdown containment
+
+- source visual truth: local user attachment `codex-clipboard-89bfa8c4-eff2-4210-b914-41e8e107c3a0.png`, reviewed locally and intentionally excluded from the public repository
+- implementation screenshot: local QA capture `smartfav-category-select-inline-aligned-final.png`, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewport: 367 × 448 CSS px, device density 1
+- source pixels: 734 × 896 px at 2×; normalized source and final implementation: 367 × 448 px
+- state: Chinese light-glass category manager with the first folder's “移动到” menu open
+
+### Full-view and focused comparison evidence
+
+The 2× source was downsampled to 367 × 448 and opened together with the 367 × 448 implementation capture in one comparison input. The source showed the floating menu crossing the first card boundary and obscuring the next two folder cards. The implementation keeps the same themed trigger and option styling, but contains the open menu inside the active card; the card grows from 168 px to 369 px and the next card begins below it. The full normalized view clearly exposes the card boundary, menu bottom, and following-content position, so an additional crop was not needed.
+
+### Required fidelity surfaces
+
+- Fonts and typography: existing folder option family, size, weight, truncation, and selected blue text remain unchanged.
+- Spacing and layout rhythm: both action triggers remain top-aligned. The open list occupies normal card flow with a 5 px trigger gap and 196 px scrollable maximum height; later cards move down instead of being covered.
+- Colors and visual tokens: the list retains the active glass surface, blur, border, focus ring, selected fill, and primary-blue check.
+- Image quality and asset fidelity: the control contains no raster imagery; existing chevron and check assets remain unchanged and sharp.
+- Copy and content: real folder destinations and their ordering remain unchanged. The disabled placeholder is still excluded.
+
+### Findings and comparison history
+
+- Initial finding (P1): an absolutely positioned category-rule menu overlaid following folder cards, making their controls and text visible through the glass and visually mixing unrelated rows.
+- Fix: category-rule menus now participate in normal document flow while open. Only favorite-row move menus retain floating-popover positioning where card expansion would break the compact bookmark row.
+- Initial implementation finding (P2): after moving the list into flow, the unopened sibling action stretched vertically and placed its trigger halfway down the enlarged card.
+- Fix: aligned the two action columns and their internal grids to the start, keeping both triggers on one row.
+- Post-fix evidence: the open menu is fully inside the active card, the next card starts below that card, trigger top-position difference is 0 px, viewport width and scroll width are both 367 px, and only one listbox is open.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for this correction.
+
+### Interaction checks
+
+- Pointer opening works for both “移动到” and “删除时迁移到”; both expand the current card and push later cards down.
+- Switching between the two controls keeps exactly one listbox open.
+- Escape collapses the first card from 369 px to 168 px; Enter reopens it and restores the 369 px expanded state.
+- Delete migration still selects `其他`; its placeholder remains hidden and its five real destinations remain available.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
+## Version 1.15.1 delete-target placeholder cleanup
+
+- source visual truth: local user attachment `codex-clipboard-bd1b4d87-5635-40c6-9814-a4ced6327266.png`, reviewed locally and intentionally excluded from the public repository
+- implementation screenshots: local QA captures `smartfav-delete-placeholder-hidden-final.png` and `smartfav-delete-placeholder-hidden-370x497.png`, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewports: 360 × 560 CSS px for interaction coverage and 370 × 497 CSS px for the normalized visual comparison, device density 1
+- source pixels: 740 × 994 px at 2×; normalized source and final comparison capture: 370 × 497 px
+- state: Chinese light-glass category manager, the second folder's “删除时迁移到” menu open with `其他` selected
+
+### Full-view and focused comparison evidence
+
+The 2× source was downsampled to 370 × 497 and opened together with the 370 × 497 browser capture in one comparison input. The source exposed `选择目标文件夹` as a first menu row even though it is instructional placeholder copy, making it look like a detached label that covers the folder list. In the implementation, the trigger keeps the current fallback selection while the open list begins directly with the first real destination folder. The focused menu region was readable in the full normalized comparison, so a separate crop was not needed.
+
+### Required fidelity surfaces
+
+- Fonts and typography: folder option typography, current-selection weight, and blue selected text remain unchanged; only the non-actionable placeholder row is removed.
+- Spacing and layout rhythm: the compact trigger, translucent menu geometry, row height, padding, radius, and shadow remain unchanged. Removing the placeholder saves one row; the later containment iteration above changes only how category-rule menus occupy space.
+- Colors and visual tokens: the menu continues to use the active glass surface, blur, focus ring, selected background, and primary-blue check token.
+- Image quality and asset fidelity: this control contains no raster asset; the existing chevron and selected-state check remain unchanged and sharp.
+- Copy and content: `选择目标文件夹` remains available as the native empty-state placeholder, but it is disabled and excluded from the listbox; every visible menu entry is now an actual destination.
+
+### Findings and comparison history
+
+- Initial finding (P2): the instructional `选择目标文件夹` option was enabled, so the dynamic listbox rendered it as a selectable folder and gave the appearance of an extra label covering the menu.
+- Fix: marked the placeholder option disabled. The shared dynamic listbox already filters disabled native options, so no duplicated special-case UI logic was added.
+- Post-fix evidence: the open menu contains only `视频`, `工具`, `学习`, `资讯`, and `其他`; visible placeholder-option count is 0, while the retained native placeholder is still present and disabled. The document and body remain 370/370 px with no horizontal overflow.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for this correction.
+
+### Interaction checks
+
+- The current delete-migration value remains `其他` and its selected check is preserved.
+- The disabled placeholder cannot receive pointer or keyboard selection and does not enter the rendered listbox.
+- The menu still opens as a themed overlay, closes normally, and leaves the separate delete action untouched.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
+## Version 1.15.1 unified folder-action dropdowns
+
+- source visual truth: three local problem-state attachments (`codex-clipboard-4b55efc9-2e0e-4f45-902c-2788cbcb2408.png`, `codex-clipboard-324ffce0-920f-4d87-9c02-8d80baab402d.png`, and `codex-clipboard-d1c86b0e-f835-4b87-b674-cbc1c43d1f53.png`) plus the selected target attachment `codex-clipboard-de5d7beb-0fec-4266-9d70-9b5877ceaf3f.png`, reviewed locally and intentionally excluded from the public repository
+- implementation screenshots: local QA captures `smartfav-dynamic-folder-move-final.png`, `smartfav-dynamic-delete-move-final.png`, and `smartfav-dynamic-favorite-move-final.png`, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewport: 360 × 560 CSS px, device density 1
+- source target pixels: 688 × 614 px; all three implementation captures: 360 × 560 px
+- state: Chinese light-glass theme with the folder-parent, delete-migration, and favorite-move menus opened independently
+
+### Full-view and focused comparison evidence
+
+The target dropdown and all three final implementation states were opened together in one comparison input. The implementation intentionally preserves each host control's compact width, but matches the target's interaction language: blue focus halo, upward chevron while open, translucent blurred menu, soft selected row, blue selected text/check, rounded options, and a slim scrollbar. The three problem screenshots confirmed that the replaced surfaces were browser-native white menus with platform selection colors rather than SmartFav components.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the existing system-font stack is retained. Compact triggers remain 10 px in row/action contexts, while menu options use 12 px semibold labels for the same readable hierarchy as the target.
+- Spacing and layout rhythm: folder-rule triggers remain 30 px high and favorite-row actions remain 29 px high so the surrounding cards do not grow. Menus use 6 px padding, 2 px option gaps, 34 px rows, and a 224 px maximum height.
+- Colors and visual tokens: triggers use the existing control, surface, primary, and focus tokens. Menus use `--settings-menu-bg`, the existing 18–22 px theme blur range, selected `--primary-soft`, and theme-aware text; no fixed white system surface remains.
+- Image quality and asset fidelity: the requested controls contain no raster assets. The existing chevron and check icon convention is reused consistently and remains sharp at density 1.
+- Copy and content: all folder paths, `移动`, `收藏分类`, `选择目标文件夹`, and bilingual accessible labels are preserved. The disabled favorite-move placeholder is correctly excluded from the target list.
+
+### Findings and comparison history
+
+- Initial finding (P1): favorite moves, folder-parent changes, and delete-migration targets opened as native browser menus, breaking the established glass dropdown style and producing inconsistent selection colors, borders, and shadows.
+- Fix: retained the native selects as hidden value/event sources and wrapped all dynamically rendered instances with one accessible themed combobox/listbox controller.
+- Initial finding (P2): compact favorite actions and half-width folder-rule fields could not use the home selector's full-width geometry without clipping or expanding their cards.
+- Fix: added context variants. Folder menus use a 168 px minimum width with edge-aware alignment; favorite menus are 184 px and right-aligned. Menus switch above the trigger when vertical space is insufficient, while open rows temporarily allow overflow.
+- Post-fix evidence: all three menus remained inside the 360 px viewport with no horizontal overflow. Glass used a translucent blurred surface; black resolved to `rgb(17, 20, 25)`; parchment resolved to `rgb(247, 236, 215)`. Exactly one menu remained open at a time.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for these controls.
+
+### Interaction checks
+
+- Favorite move: selecting `编程` moved the YouTube favorite out of `视频`, leaving the expected empty state.
+- Folder parent: keyboard Enter opened the menu, ArrowDown moved focus, Escape closed and restored focus, and selecting `编程` moved `视频` beneath it; the controls rebuilt cleanly after the rerender.
+- Delete migration: choosing an option updates the retained native select and selected check without deleting anything until the separate delete action is used.
+- Pointer outside, view changes, rerenders, Escape, and Tab close the active menu. Only one dynamic menu can be open at a time.
+- Native select change events remain the business-logic boundary; failed moves restore both the native value and the themed label.
+- Glass, black, and parchment themes were switched through the real appearance control. The final handoff state is restored to light glass.
+- Document and body widths both resolve to 360/360.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
+## Version 1.15.1 inline folder feedback and themed search surfaces
+
+- source visual truth: two local user attachments (`codex-clipboard-2d6242c5-7f8b-4152-9d3b-43810c2f069a.png` and `codex-clipboard-871b2480-5e47-415e-9f38-5bda54344f82.png`), reviewed locally and intentionally excluded from the public repository
+- implementation screenshots: local QA captures `smartfav-create-search-final.png`, `smartfav-create-feedback-comparison.png`, and `smartfav-search-comparison-final.png`, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewport: 360 × 560 CSS px, device density 1
+- source pixels: create region 342 × 206 px and search region 349 × 89 px; implementation full view 360 × 560 px, with normalized crops at 342 × 206 px and 349 × 89 px
+- state: Chinese category-folder view, light glass theme, successful creation of `视觉测试`, and both category/favorite search controls in their idle state
+
+### Full-view and focused comparison evidence
+
+The two source regions and their final implementation crops were opened together in the same comparison inputs. The create region preserves the existing title, explanation, compact input/button row, and keyword guidance, while adding one small success line directly below the input row. The search region preserves the same size and placement but replaces the visually detached opaque fill with a theme-token surface and backdrop blur. The 349 × 89 search comparison used identical source and implementation pixel dimensions.
+
+### Required fidelity surfaces
+
+- Fonts and typography: existing system typography, 11 px input copy, and compact hint hierarchy are unchanged. The new feedback uses a 10 px success/error line so it reads as local confirmation rather than a new section.
+- Spacing and layout rhythm: the feedback occupies a new grid row directly under the create input/button only when it contains text. Empty state adds no height. Both search bars retain the existing sticky position, 8 px vertical padding, control radius, and compact 13 px search text.
+- Colors and visual tokens: create success/error text uses `--success` and `--danger`. Search containers use `--search-bar-bg`, inputs use `--search-input-bg`, and both follow glass, black, parchment, solid, dark, and custom-background theme surfaces instead of a fixed pale panel.
+- Image quality and asset fidelity: neither requested region includes raster assets or non-standard icons; existing assets remain unchanged.
+- Copy and content: success reports the actual created folder name; duplicate and empty-name errors use existing bilingual messages. Chinese and English translations remain key-aligned.
+
+### Findings and comparison history
+
+- Initial finding (P1): folder creation feedback was emitted in the generic status area below the entire manager and automatic focus moved the viewport to the new rule, so the user could not see whether creation succeeded beside the initiating field.
+- Fix: introduced a dedicated live status in the create grid, routed creation success and validation/conflict errors to it, retained focus on the create field, and clear the message when the user starts the next name.
+- Initial finding (P2): both search bars used a special opaque glass override, making the search region appear like a foreign white strip instead of part of the selected theme.
+- Fix: introduced semantic search surface variables, removed the fixed glass override, added input-level backdrop blur, and mapped custom backgrounds to `--custom-surface`.
+- Post-fix evidence: successful creation remained visible at y 243 directly below the input ending at y 237. Duplicate and whitespace-only name paths showed inline errors. Glass resolved to translucent `rgba(247, 249, 252, 0.12)` / `rgba(255, 255, 255, 0.16)` surfaces; black resolved to `rgb(23, 26, 31)` / `rgb(11, 13, 16)`; parchment resolved to `rgb(234, 217, 184)` / `rgb(244, 231, 203)`.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for these focused changes.
+
+### Interaction checks
+
+- Successful folder creation shows `已创建“视觉测试”，请继续填写匹配关键词` below the create row and keeps the create input focused and visible.
+- Reusing the same folder name shows the localized conflict message in the same position.
+- A whitespace-only name shows `请填写文件夹名称` and returns focus to the input.
+- Typing a new name clears the previous create message.
+- Both `favoritesSearchInput` and `categoriesSearchInput` use the same themed search variables and 18 px backdrop blur.
+- Glass, black, and parchment themes were switched through the real appearance control and rendered without horizontal overflow; the final preview was restored to light glass.
+- Document and body widths both resolve to 360/360.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, locale syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
+## Version 1.15.1 themed settings dropdowns
+
+- source visual truth: four local user attachments (`codex-clipboard-10119f4e-aa6b-4f92-83bb-cfa0069601c2.png`, `codex-clipboard-e02cebae-fd09-492f-8494-20cbf8ae1c41.png`, `codex-clipboard-7ec1383d-72fc-46cc-96df-382087b07f99.png`, and `codex-clipboard-90b5814b-801d-4fd7-8c39-669017274e72.png`), reviewed locally and intentionally excluded from the public repository
+- implementation screenshot: local QA capture `smartfav-themed-select-provider-final.png`, reviewed locally and intentionally excluded from the public repository
+- browser-rendered viewport: 360 × 560 CSS px, device density 1
+- source provider screenshot: 362 × 310 px; implementation full view: 360 × 560 px; implementation comparison crop: 360 × 310 px
+- state: Chinese settings view, light glass theme, AI enabled, provider menu open with Ollama selected
+
+### Full-view and focused comparison evidence
+
+The source AI-provider screenshot and a 360 × 310 implementation crop were opened together in one comparison input. The source exposed the browser's opaque white native picker, which ignored SmartFav's glass surface and focus treatment. The implementation keeps the same compact field width and option order but renders an app-owned listbox using the active theme tokens, a translucent blurred surface, the existing blue focus halo, and a clear selected-option check. Separate live checks covered the bookmark write mode, classification strategy, and appearance style menus.
+
+### Required fidelity surfaces
+
+- Fonts and typography: the existing system-font stack and 12 px settings-field typography remain unchanged. Option labels keep their Chinese and English translations and truncate safely when space is constrained.
+- Spacing and layout rhythm: the trigger remains 38 px high, options are 32 px high, and the menu uses compact 6 px padding and 2 px gaps. The menu automatically opens upward when the remaining settings viewport is too short.
+- Colors and visual tokens: glass uses `--settings-menu-bg` with 22 px blur and 145% saturation; white, gray, black, and parchment inherit their semantic overlay surfaces. The selected row uses `--primary-soft` and `--primary`, while hover/focus states reuse existing control tokens.
+- Image quality and asset fidelity: the controls contain no raster imagery. The chevron and selected-state check use the existing inline icon convention and remain sharp at device density 1.
+- Copy and content: provider, strategy, write-mode, and appearance option values are unchanged. Language switching re-renders every option label without reopening the popup.
+
+### Findings and comparison history
+
+- Initial finding (P1): the four native `<select>` menus were drawn by the browser as opaque white system popups, so they broke glass, black, parchment, and custom-background themes.
+- Fix: retained each native select as the single state and persistence source, hid only its visual surface, and added an accessible themed combobox/listbox controller that dispatches the existing native `change` event.
+- Post-fix evidence: glass, black, and parchment menus were rendered and inspected in the browser. Black resolved to `rgb(17, 20, 25)` with white option text; parchment resolved to `rgb(247, 236, 215)` with brown option text. White and gray are covered by the same semantic overlay token path. No horizontal overflow occurred at 360 px.
+- No actionable P0, P1, or P2 mismatch remains. No P3 follow-up is required for this focused interaction.
+
+### Interaction checks
+
+- All four settings controls expose `role="combobox"`, `aria-expanded`, `aria-controls`, and a labelled `role="listbox"`; option state uses `aria-selected`.
+- Pointer selection updates the retained native select and invokes the existing theme, AI-provider, classification-strategy, or bookmark-write handler.
+- Keyboard checks covered Enter/Space opening and selection, Arrow navigation, Home/End, Escape, Tab closing, focus restoration, and outside-click dismissal.
+- Only one settings menu can be open at a time; switching views or collapsing its settings section closes it.
+- The Chinese/English switch re-renders translated option labels. Theme switching was verified for glass, black, and parchment, with the final state restored to Chinese light glass.
+- DOM/content: all four native selects remain present and hidden, all menus are closed after interaction, and document/body widths both resolve to 360/360.
+- Console: no errors or warnings.
+- Automated checks: JavaScript syntax, `git diff --check`, and `node tests/verify-extension.js` pass.
+
+final result: passed
+
 ## Version 1.15.1 category-folder drop preview
 
 - source visual truth: user-provided category-folder drag reference, reviewed locally and intentionally excluded from the public repository

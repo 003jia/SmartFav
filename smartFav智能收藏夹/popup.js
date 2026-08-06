@@ -189,10 +189,17 @@ const elements = {
   mainView: document.getElementById('mainView'),
   favoritesView: document.getElementById('favoritesView'),
   categoriesView: document.getElementById('categoriesView'),
+  folderPickerView: document.getElementById('folderPickerView'),
   trashView: document.getElementById('trashView'),
   settingsView: document.getElementById('settingsView'),
   favoritesBackBtn: document.getElementById('favoritesBackBtn'),
   categoriesBackBtn: document.getElementById('categoriesBackBtn'),
+  folderPickerBackBtn: document.getElementById('folderPickerBackBtn'),
+  folderPickerSearchInput: document.getElementById('folderPickerSearchInput'),
+  folderPickerSearchClear: document.getElementById('folderPickerSearchClear'),
+  folderPickerBreadcrumb: document.getElementById('folderPickerBreadcrumb'),
+  folderPickerList: document.getElementById('folderPickerList'),
+  folderPickerEmpty: document.getElementById('folderPickerEmpty'),
   trashBackBtn: document.getElementById('trashBackBtn'),
   trashNavBtn: document.getElementById('trashNavBtn'),
   trashEntryCount: document.getElementById('trashEntryCount'),
@@ -296,6 +303,7 @@ const elements = {
   bookmarkBackupStatus: document.getElementById('bookmarkBackupStatus'),
   compactNewCategory: document.getElementById('compactNewCategory'),
   compactAddCategoryBtn: document.getElementById('compactAddCategoryBtn'),
+  categoryCreateStatus: document.getElementById('categoryCreateStatus'),
   categoryKeywordAiAnalyzeBtn: document.getElementById('categoryKeywordAiAnalyzeBtn'),
   aiOrganizationAnalyzeBtn: document.getElementById('aiOrganizationAnalyzeBtn'),
   aiOrganizationPreview: document.getElementById('aiOrganizationPreview'),
@@ -339,6 +347,20 @@ let aiKeywordAnalysisInFlight = false;
 let categoryKeywordSuggestionCounts = {};
 let pendingAIFolderProposal = null;
 let activeAIOrganizationProposal = null;
+const SETTINGS_SELECT_IDS = [
+  'compactThemeStyle',
+  'compactProvider',
+  'compactClassificationMode',
+  'compactBookmarkWriteMode'
+];
+const settingsSelectControls = new Map();
+let openSettingsSelectId = '';
+let openDynamicThemedSelectControl = null;
+let dynamicThemedSelectSequence = 0;
+let dynamicThemedSelectDocumentEventsBound = false;
+let activeFolderPicker = null;
+let folderPickerParentId = null;
+let folderPickerQuery = '';
 
 // 弹窗启动链路：任何一步抛错都必须收敛成「错误提示 + 重试入口」，
 // 否则用户只会看到永久停留的「正在读取当前网页」而无法自救。
@@ -379,6 +401,7 @@ async function runBootstrapWithRetry() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initSettingsSelectControls();
   if (elements.retryBootstrapBtn) {
     elements.retryBootstrapBtn.addEventListener('click', () => { runBootstrapWithRetry(); });
   }
@@ -1062,12 +1085,15 @@ function applyLanguage() {
     home: 'saveCurrentPage',
     favorites: 'myFavorites',
     categories: 'categoryFolders',
+    folderPicker: 'chooseFolder',
     trash: 'recentlyDeleted',
     settings: 'extensionSettings'
   };
   elements.settingsBtn.textContent = t(isHome ? 'settings' : 'back');
   elements.settingsBtn.setAttribute('aria-label', t(isHome ? 'openSettings' : 'backToHome'));
   elements.brandCaption.textContent = t(captionKeys[activeView] || 'saveCurrentPage');
+  if (activeFolderPicker) renderFolderDestinationPicker();
+  refreshSettingsSelectControls({ renderOptions: true });
   // 分组摘要是运行时拼出来的，data-i18n 兜不住，换语言后要重算一遍。
   updateSettingsGroupSummaries();
   applyAppearance();
@@ -1082,6 +1108,7 @@ async function toggleColorMode() {
   if (activeView === 'settings') {
     elements.compactThemeStyle.value = normalizeThemeStyle(currentSettings.themeStyle);
     elements.compactDarkMode.checked = currentSettings.colorMode === 'dark';
+    syncSettingsSelectControl('compactThemeStyle');
     updateAppearancePreview();
   }
 }
@@ -1289,6 +1316,602 @@ function selectCategoryFromControl(value) {
   elements.categorySelect.value = value;
   elements.categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
   setCategorySelectOpen(false, { restoreFocus: true });
+}
+
+function getSettingsSelectEntry(selectOrId) {
+  const id = typeof selectOrId === 'string' ? selectOrId : selectOrId && selectOrId.id;
+  return id ? settingsSelectControls.get(id) || null : null;
+}
+
+function getSettingsSelectOptionButtons(entry) {
+  return entry ? Array.from(entry.menu.querySelectorAll('.settings-select-option')) : [];
+}
+
+function syncSettingsSelectControl(selectOrId) {
+  const entry = getSettingsSelectEntry(selectOrId);
+  if (!entry) return;
+  const selectedOption = entry.select.selectedOptions[0] || null;
+  const selectedValue = entry.select.value;
+  const selectedLabel = selectedOption ? selectedOption.textContent.trim() : '';
+  entry.value.textContent = selectedLabel;
+  entry.button.title = selectedLabel;
+  entry.button.disabled = entry.select.disabled || entry.select.options.length === 0;
+  getSettingsSelectOptionButtons(entry).forEach((button) => {
+    button.setAttribute('aria-selected', button.dataset.value === selectedValue ? 'true' : 'false');
+  });
+}
+
+function focusSettingsSelectOption(entry, index) {
+  const options = getSettingsSelectOptionButtons(entry);
+  if (!options.length) return;
+  const nextIndex = Math.max(0, Math.min(options.length - 1, index));
+  options[nextIndex].focus();
+  entry.button.setAttribute('aria-activedescendant', options[nextIndex].id);
+}
+
+function setSettingsSelectOpen(selectOrId, open, { focusSelected = false, restoreFocus = false } = {}) {
+  const entry = getSettingsSelectEntry(selectOrId);
+  if (!entry) return;
+  const shouldOpen = Boolean(open)
+    && !entry.select.disabled
+    && entry.select.options.length > 0;
+
+  if (shouldOpen && openSettingsSelectId && openSettingsSelectId !== entry.select.id) {
+    setSettingsSelectOpen(openSettingsSelectId, false);
+  }
+
+  entry.control.classList.toggle('is-open', shouldOpen);
+  entry.menu.classList.toggle('hidden', !shouldOpen);
+  entry.button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  entry.group?.classList.toggle('has-open-settings-select', shouldOpen);
+  if (!shouldOpen) {
+    entry.control.classList.remove('is-above');
+    entry.button.removeAttribute('aria-activedescendant');
+    if (openSettingsSelectId === entry.select.id) openSettingsSelectId = '';
+    if (restoreFocus) entry.button.focus();
+    return;
+  }
+
+  const settingsRect = elements.settingsView.getBoundingClientRect();
+  const buttonRect = entry.button.getBoundingClientRect();
+  const menuHeight = Math.min(224, (entry.select.options.length * 34) + 12);
+  const spaceBelow = settingsRect.bottom - buttonRect.bottom;
+  const spaceAbove = buttonRect.top - settingsRect.top;
+  entry.control.classList.toggle('is-above', spaceBelow < menuHeight && spaceAbove > spaceBelow);
+  openSettingsSelectId = entry.select.id;
+  if (focusSelected) {
+    const selectedIndex = Math.max(0, entry.select.selectedIndex);
+    requestAnimationFrame(() => focusSettingsSelectOption(entry, selectedIndex));
+  }
+}
+
+function closeSettingsSelectControls({ restoreFocus = false } = {}) {
+  if (!openSettingsSelectId) return;
+  setSettingsSelectOpen(openSettingsSelectId, false, { restoreFocus });
+}
+
+function renderSettingsSelectControl(selectOrId) {
+  const entry = getSettingsSelectEntry(selectOrId);
+  if (!entry) return;
+  const selectedValue = entry.select.value;
+  entry.menu.innerHTML = Array.from(entry.select.options)
+    .map((option, index) => `
+      <button
+        id="${escapeHtml(entry.select.id)}Option-${index}"
+        class="settings-select-option"
+        type="button"
+        role="option"
+        tabindex="-1"
+        data-value="${escapeHtml(option.value)}"
+        aria-selected="${option.value === selectedValue ? 'true' : 'false'}"
+      >
+        <span>${escapeHtml(option.textContent)}</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m3.5 8 3 3 6-6.5"></path>
+        </svg>
+      </button>
+    `)
+    .join('');
+  syncSettingsSelectControl(entry.select.id);
+}
+
+function refreshSettingsSelectControls({ renderOptions = false } = {}) {
+  closeSettingsSelectControls();
+  settingsSelectControls.forEach((entry) => {
+    if (renderOptions) renderSettingsSelectControl(entry.select.id);
+    else syncSettingsSelectControl(entry.select.id);
+  });
+}
+
+function selectSettingsSelectValue(entry, value) {
+  if (!Array.from(entry.select.options).some((option) => option.value === value)) return;
+  entry.select.value = value;
+  syncSettingsSelectControl(entry.select.id);
+  entry.select.dispatchEvent(new Event('change', { bubbles: true }));
+  setSettingsSelectOpen(entry.select.id, false, { restoreFocus: true });
+}
+
+function initSettingsSelectControls() {
+  SETTINGS_SELECT_IDS.forEach((id) => {
+    if (settingsSelectControls.has(id)) return;
+    const select = document.getElementById(id);
+    const control = document.querySelector(`[data-settings-select="${id}"]`);
+    const button = document.getElementById(`${id}Button`);
+    const value = document.getElementById(`${id}Value`);
+    const menu = document.getElementById(`${id}Menu`);
+    if (!select || !control || !button || !value || !menu) return;
+    const entry = {
+      select,
+      control,
+      button,
+      value,
+      menu,
+      group: control.closest('.settings-group')
+    };
+    settingsSelectControls.set(id, entry);
+    select.addEventListener('change', () => syncSettingsSelectControl(id));
+    button.addEventListener('click', () => {
+      setSettingsSelectOpen(id, !control.classList.contains('is-open'), { focusSelected: true });
+    });
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Escape'].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === 'Escape') {
+        setSettingsSelectOpen(id, false);
+        return;
+      }
+      setSettingsSelectOpen(id, true, { focusSelected: true });
+    });
+    menu.addEventListener('click', (event) => {
+      const option = event.target.closest('.settings-select-option');
+      if (option) selectSettingsSelectValue(entry, option.dataset.value);
+    });
+    menu.addEventListener('keydown', (event) => {
+      const option = event.target.closest('.settings-select-option');
+      if (!option) return;
+      const options = getSettingsSelectOptionButtons(entry);
+      const index = options.indexOf(option);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusSettingsSelectOption(entry, index + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        focusSettingsSelectOption(entry, event.key === 'Home' ? 0 : options.length - 1);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectSettingsSelectValue(entry, option.dataset.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setSettingsSelectOpen(id, false, { restoreFocus: true });
+      } else if (event.key === 'Tab') {
+        setSettingsSelectOpen(id, false);
+      }
+    });
+    renderSettingsSelectControl(id);
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    const entry = getSettingsSelectEntry(openSettingsSelectId);
+    if (entry && !entry.control.contains(event.target)) closeSettingsSelectControls();
+  });
+}
+
+function getDynamicThemedSelectParts(controlOrSelect) {
+  const control = controlOrSelect?.matches?.('.themed-select-control')
+    ? controlOrSelect
+    : controlOrSelect?.closest?.('.themed-select-control');
+  if (!control) return null;
+  return {
+    control,
+    select: control.querySelector('.themed-native-select'),
+    button: control.querySelector('.themed-select-button'),
+    value: control.querySelector('.themed-select-value'),
+    menu: control.querySelector('.themed-select-menu')
+  };
+}
+
+function getDynamicThemedSelectOptionButtons(parts) {
+  return parts
+    ? Array.from(parts.menu.querySelectorAll('.themed-select-option'))
+    : [];
+}
+
+function syncDynamicThemedSelect(controlOrSelect) {
+  const parts = getDynamicThemedSelectParts(controlOrSelect);
+  if (!parts || !parts.select || !parts.button || !parts.value) return;
+  const selectedOption = parts.select.selectedOptions[0] || null;
+  const selectedValue = parts.select.value;
+  const selectedLabel = selectedOption ? selectedOption.textContent.trim() : '';
+  parts.value.textContent = selectedLabel;
+  parts.button.title = parts.select.title || selectedLabel;
+  parts.button.disabled = parts.select.disabled || parts.select.options.length === 0;
+  getDynamicThemedSelectOptionButtons(parts).forEach((optionButton) => {
+    optionButton.setAttribute(
+      'aria-selected',
+      optionButton.dataset.value === selectedValue ? 'true' : 'false'
+    );
+  });
+}
+
+function focusDynamicThemedSelectOption(parts, index) {
+  const options = getDynamicThemedSelectOptionButtons(parts);
+  if (!options.length) return;
+  const nextIndex = Math.max(0, Math.min(options.length - 1, index));
+  options[nextIndex].focus();
+  parts.button.setAttribute('aria-activedescendant', options[nextIndex].id);
+}
+
+function setDynamicThemedSelectOpen(
+  controlOrSelect,
+  open,
+  { focusSelected = false, restoreFocus = false } = {}
+) {
+  const parts = getDynamicThemedSelectParts(controlOrSelect);
+  if (!parts) return;
+  const optionButtons = getDynamicThemedSelectOptionButtons(parts);
+  const shouldOpen = Boolean(open)
+    && !parts.select.disabled
+    && optionButtons.length > 0;
+
+  if (shouldOpen
+    && openDynamicThemedSelectControl
+    && openDynamicThemedSelectControl !== parts.control) {
+    setDynamicThemedSelectOpen(openDynamicThemedSelectControl, false);
+  }
+
+  parts.control.classList.toggle('is-open', shouldOpen);
+  parts.menu.classList.toggle('hidden', !shouldOpen);
+  parts.button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  const owner = parts.control.closest('.favorite-row-card, .category-rule-item');
+  owner?.classList.toggle('has-open-themed-select', shouldOpen);
+
+  if (!shouldOpen) {
+    parts.control.classList.remove('is-above');
+    parts.button.removeAttribute('aria-activedescendant');
+    if (openDynamicThemedSelectControl === parts.control) {
+      openDynamicThemedSelectControl = null;
+    }
+    if (restoreFocus) parts.button.focus();
+    return;
+  }
+
+  const boundary = parts.control.closest('.panel-view')?.getBoundingClientRect()
+    || { top: 0, bottom: window.innerHeight };
+  const buttonRect = parts.button.getBoundingClientRect();
+  const menuHeight = Math.min(224, (optionButtons.length * 34) + 12);
+  const spaceBelow = boundary.bottom - buttonRect.bottom;
+  const spaceAbove = buttonRect.top - boundary.top;
+  const opensInsideCategoryCard = parts.control.classList.contains(
+    'themed-select-control-compact'
+  );
+  parts.control.classList.toggle('is-inline', opensInsideCategoryCard);
+  parts.control.classList.toggle('is-above', (
+    !opensInsideCategoryCard
+    && spaceBelow < menuHeight
+    && spaceAbove > spaceBelow
+  ));
+  openDynamicThemedSelectControl = parts.control;
+
+  if (focusSelected) {
+    const selectedIndex = optionButtons.findIndex((optionButton) => (
+      optionButton.dataset.value === parts.select.value
+    ));
+    requestAnimationFrame(() => focusDynamicThemedSelectOption(
+      parts,
+      selectedIndex >= 0 ? selectedIndex : 0
+    ));
+  }
+}
+
+function closeDynamicThemedSelectControl({ restoreFocus = false } = {}) {
+  if (!openDynamicThemedSelectControl) return;
+  if (!openDynamicThemedSelectControl.isConnected) {
+    openDynamicThemedSelectControl = null;
+    return;
+  }
+  setDynamicThemedSelectOpen(
+    openDynamicThemedSelectControl,
+    false,
+    { restoreFocus }
+  );
+}
+
+function getFolderPickerAllowedOptions(select) {
+  return new Map(Array.from(select.options)
+    .filter((option) => !option.disabled)
+    .map((option) => [option.value, option.textContent.trim()]));
+}
+
+function getFolderPickerAllowedChildren(parentId) {
+  if (!activeFolderPicker) return [];
+  return getFolderIndex().children(parentId)
+    .filter((folder) => activeFolderPicker.allowedOptions.has(folder.id));
+}
+
+function folderPickerHasAllowedChildren(folderId) {
+  return getFolderPickerAllowedChildren(folderId).length > 0;
+}
+
+function renderFolderPickerRow({ value, name, path = '', hasChildren = false }) {
+  if (!activeFolderPicker) return '';
+  const selected = value === activeFolderPicker.select.value;
+  const pathMarkup = path && path !== name
+    ? `<small>${escapeHtml(path)}</small>`
+    : '';
+  return `
+    <div class="folder-picker-row${selected ? ' is-selected' : ''}" role="listitem">
+      <button
+        class="folder-picker-select"
+        type="button"
+        data-folder-picker-value="${escapeHtml(value)}"
+        aria-current="${selected ? 'true' : 'false'}"
+        title="${escapeHtml(path || name)}"
+      >
+        <span class="folder-picker-row-copy">
+          <strong>${escapeHtml(name)}</strong>
+          ${pathMarkup}
+        </span>
+        <svg class="folder-picker-check" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m3.5 8 3 3 6-6.5"></path>
+        </svg>
+      </button>
+      ${hasChildren ? `
+        <button
+          class="folder-picker-enter"
+          type="button"
+          data-folder-picker-parent="${escapeHtml(value)}"
+          aria-label="${escapeHtml(t('openSubfolders', { folder: name }))}"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m7.5 4.5 5 5-5 5"></path>
+          </svg>
+        </button>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderFolderDestinationPicker() {
+  if (!activeFolderPicker) return;
+  const normalizedQuery = folderPickerQuery.trim().toLocaleLowerCase();
+  const allowedFolders = currentFolders.filter((folder) => (
+    activeFolderPicker.allowedOptions.has(folder.id)
+  ));
+  const path = folderPickerParentId
+    ? SmartFavFolderTree.getPath(currentFolders, folderPickerParentId)
+    : [];
+
+  elements.folderPickerBreadcrumb.innerHTML = `
+    <button type="button" data-folder-picker-parent="">${escapeHtml(t('favoriteCategories'))}</button>
+    ${path.map((folder) => `
+      <span aria-hidden="true">›</span>
+      <button type="button" data-folder-picker-parent="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</button>
+    `).join('')}
+  `;
+
+  let rows = [];
+  if (normalizedQuery) {
+    rows = allowedFolders
+      .filter((folder) => {
+        const label = `${folder.name} ${getFolderPathLabel(folder.id)}`.toLocaleLowerCase();
+        return label.includes(normalizedQuery);
+      })
+      .sort((left, right) => getFolderPathLabel(left.id)
+        .localeCompare(getFolderPathLabel(right.id)))
+      .map((folder) => renderFolderPickerRow({
+        value: folder.id,
+        name: folder.name,
+        path: getFolderPathLabel(folder.id),
+        hasChildren: folderPickerHasAllowedChildren(folder.id)
+      }));
+    if (activeFolderPicker.allowedOptions.has('')
+      && t('favoriteCategories').toLocaleLowerCase().includes(normalizedQuery)) {
+      rows.unshift(renderFolderPickerRow({
+        value: '',
+        name: t('favoriteCategories')
+      }));
+    }
+  } else {
+    if (!folderPickerParentId && activeFolderPicker.allowedOptions.has('')) {
+      rows.push(renderFolderPickerRow({
+        value: '',
+        name: t('favoriteCategories')
+      }));
+    }
+    rows.push(...getFolderPickerAllowedChildren(folderPickerParentId).map((folder) => (
+      renderFolderPickerRow({
+        value: folder.id,
+        name: folder.name,
+        hasChildren: folderPickerHasAllowedChildren(folder.id)
+      })
+    )));
+  }
+
+  elements.folderPickerList.innerHTML = rows.join('');
+  elements.folderPickerEmpty.classList.toggle('hidden', rows.length > 0);
+  elements.folderPickerSearchClear.classList.toggle('hidden', !folderPickerQuery);
+}
+
+function openFolderDestinationPicker(controlOrSelect) {
+  const parts = getDynamicThemedSelectParts(controlOrSelect);
+  if (!parts || parts.select.disabled) return;
+  const allowedOptions = getFolderPickerAllowedOptions(parts.select);
+  if (!allowedOptions.size) return;
+  closeDynamicThemedSelectControl();
+  const selectedFolder = SmartFavFolderTree.getFolder(currentFolders, parts.select.value);
+  activeFolderPicker = {
+    select: parts.select,
+    control: parts.control,
+    returnView: activeView,
+    allowedOptions
+  };
+  folderPickerParentId = selectedFolder ? selectedFolder.parentId : null;
+  folderPickerQuery = '';
+  elements.folderPickerSearchInput.value = '';
+  activeView = 'folderPicker';
+  setPrimaryViewVisibility(activeView);
+  applyLanguage();
+  requestAnimationFrame(() => elements.folderPickerSearchInput.focus());
+}
+
+function closeFolderDestinationPicker({ restoreFocus = true } = {}) {
+  if (!activeFolderPicker) return;
+  const picker = activeFolderPicker;
+  const returnView = picker.returnView;
+  activeFolderPicker = null;
+  folderPickerParentId = null;
+  folderPickerQuery = '';
+  elements.folderPickerSearchInput.value = '';
+  activeView = returnView;
+  setPrimaryViewVisibility(activeView);
+  applyLanguage();
+  if (restoreFocus && picker.control.isConnected) {
+    requestAnimationFrame(() => picker.control.querySelector('.themed-select-button')?.focus());
+  }
+}
+
+function selectFolderDestination(value) {
+  if (!activeFolderPicker || !activeFolderPicker.allowedOptions.has(value)) return;
+  const select = activeFolderPicker.select;
+  select.value = value;
+  syncDynamicThemedSelect(select);
+  closeFolderDestinationPicker({ restoreFocus: false });
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function renderDynamicThemedSelect(controlOrSelect) {
+  const parts = getDynamicThemedSelectParts(controlOrSelect);
+  if (!parts) return;
+  const selectedValue = parts.select.value;
+  parts.menu.innerHTML = Array.from(parts.select.options)
+    .filter((option) => !option.disabled)
+    .map((option, index) => `
+      <button
+        id="${escapeHtml(parts.control.id)}Option-${index}"
+        class="themed-select-option"
+        type="button"
+        role="option"
+        tabindex="-1"
+        data-value="${escapeHtml(option.value)}"
+        aria-selected="${option.value === selectedValue ? 'true' : 'false'}"
+      >
+        <span>${escapeHtml(option.textContent)}</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m3.5 8 3 3 6-6.5"></path>
+        </svg>
+      </button>
+    `)
+    .join('');
+  syncDynamicThemedSelect(parts.control);
+}
+
+function selectDynamicThemedSelectValue(parts, value) {
+  if (!Array.from(parts.select.options).some((option) => (
+    !option.disabled && option.value === value
+  ))) return;
+  parts.select.value = value;
+  syncDynamicThemedSelect(parts.control);
+  parts.select.dispatchEvent(new Event('change', { bubbles: true }));
+  queueMicrotask(() => syncDynamicThemedSelect(parts.control));
+  setDynamicThemedSelectOpen(parts.control, false, { restoreFocus: true });
+}
+
+function initDynamicThemedSelectControls(container) {
+  const selector = [
+    'select.favorite-move-select',
+    'select.category-parent-select',
+    'select.category-delete-target'
+  ].join(', ');
+  container.querySelectorAll(selector).forEach((select) => {
+    if (select.classList.contains('themed-native-select')) return;
+    const control = document.createElement('div');
+    control.id = `dynamicThemedSelect-${++dynamicThemedSelectSequence}`;
+    control.className = 'themed-select-control';
+    if (select.classList.contains('favorite-move-select')) {
+      control.classList.add('themed-select-control-favorite');
+    } else {
+      control.classList.add('themed-select-control-compact');
+    }
+    if (select.classList.contains('category-delete-target')) {
+      control.classList.add('themed-select-align-right');
+    }
+
+    const button = document.createElement('button');
+    button.id = `${control.id}Button`;
+    button.type = 'button';
+    button.draggable = false;
+    button.className = 'themed-select-button';
+    button.setAttribute('aria-controls', 'folderPickerView');
+    const ariaLabel = select.getAttribute('aria-label')
+      || select.closest('.category-folder-action')?.querySelector('span')?.textContent.trim()
+      || '';
+    button.setAttribute('aria-label', ariaLabel);
+    button.innerHTML = `
+      <span class="themed-select-value"></span>
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="m8 6 4 4-4 4"></path>
+      </svg>
+    `;
+
+    const menu = document.createElement('div');
+    menu.id = `${control.id}Menu`;
+    menu.className = 'themed-select-menu hidden';
+    menu.setAttribute('role', 'listbox');
+    menu.setAttribute('aria-labelledby', button.id);
+
+    select.before(control);
+    control.append(select, button, menu);
+    select.classList.add('themed-native-select');
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+    const parts = { control, select, button, menu };
+
+    select.addEventListener('change', () => syncDynamicThemedSelect(control));
+    control.addEventListener('pointerdown', (event) => event.stopPropagation());
+    control.addEventListener('dragstart', (event) => event.preventDefault());
+    button.addEventListener('click', () => openFolderDestinationPicker(control));
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      openFolderDestinationPicker(control);
+    });
+    menu.addEventListener('click', (event) => {
+      const option = event.target.closest('.themed-select-option');
+      if (option) selectDynamicThemedSelectValue(parts, option.dataset.value);
+    });
+    menu.addEventListener('keydown', (event) => {
+      const option = event.target.closest('.themed-select-option');
+      if (!option) return;
+      const options = getDynamicThemedSelectOptionButtons(parts);
+      const index = options.indexOf(option);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        focusDynamicThemedSelectOption(parts, index + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        focusDynamicThemedSelectOption(parts, event.key === 'Home' ? 0 : options.length - 1);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectDynamicThemedSelectValue(parts, option.dataset.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setDynamicThemedSelectOpen(control, false, { restoreFocus: true });
+      } else if (event.key === 'Tab') {
+        setDynamicThemedSelectOpen(control, false);
+      }
+    });
+    renderDynamicThemedSelect(control);
+  });
+
+  if (!dynamicThemedSelectDocumentEventsBound) {
+    document.addEventListener('pointerdown', (event) => {
+      if (openDynamicThemedSelectControl
+        && !openDynamicThemedSelectControl.contains(event.target)) {
+        closeDynamicThemedSelectControl();
+      }
+    });
+    dynamicThemedSelectDocumentEventsBound = true;
+  }
 }
 
 function showCategorySuggestion(suggestion) {
@@ -1745,6 +2368,10 @@ async function undoPageLearning() {
 
 elements.pageLearningUndoBtn.addEventListener('click', undoPageLearning);
 
+// 统一的文件夹浏览器：一个函数渲染任意层级（根或子文件夹）。
+// 形态 A（根文件夹列表）和形态 C（文件夹内容）合并：子文件夹行 + 本层收藏行
+// 在同一个滚动流里，子文件夹在上、收藏在下——文件管理器的样子。
+// 面包屑做跨层导航，不再需要 #backToFolders 返回按钮。
 async function renderFolders(parentId = null) {
   activeFavoriteCategory = parentId || null;
   const result = await storageGet(['favorites', 'folders', 'favoriteOrder']);
@@ -1752,7 +2379,7 @@ async function renderFolders(parentId = null) {
   if (Array.isArray(result.folders) && result.folders.length) {
     currentFolders = SmartFavFolderTree.normalizeFolders(result.folders);
   }
-  const folders = SmartFavFolderTree.childrenOf(currentFolders, parentId);
+  const childFolders = SmartFavFolderTree.childrenOf(currentFolders, parentId);
   activeFavoriteOrder = normalizeFavoriteOrderMap(result.favoriteOrder);
   elements.totalCount.textContent = t('favoritesCount', { count: favorites.length });
   const librarySummary = t('librarySummary', {
@@ -1764,30 +2391,75 @@ async function renderFolders(parentId = null) {
   elements.categoryEntrySummary.textContent = t('categoryCount', { count: currentFolders.length });
   elements.recentSection.classList.toggle('hidden', Boolean(parentId));
   elements.foldersHeading.classList.remove('hidden');
-  elements.foldersList.classList.remove('list-view');
-  elements.foldersList.innerHTML = `${parentId ? renderFolderBreadcrumb(parentId) : ''}${folders.map((folder) => `
+
+  // 搜索模式：只在根层级做跨层扁平搜索（子层级仍按当前层过滤，不破坏进文件夹后的体验）。
+  // resolveVisibleFolders 会遍历全部文件夹，name 命中的带上完整路径标签，
+  // 这样用户搜"客户"能直接看到"工作 › 客户"，而不用先知道它在哪一层。
+  const query = searchScopes.favorites.query;
+  const searchingAtRoot = Boolean(query) && !parentId;
+
+  const displayFolders = searchingAtRoot
+    ? SmartFavFolderNav.resolveVisibleFolders(currentFolders, { query })
+    : childFolders.map((folder) => ({ folder, pathLabel: folder.name }));
+
+  // 本层收藏：搜索态（根层级）不列收藏，只列文件夹命中；非搜索态下进到具体文件夹才列。
+  const orderedFavorites = (!searchingAtRoot && parentId)
+    ? applyFavoriteOrderById(favorites, parentId, activeFavoriteOrder[parentId])
+    : [];
+  const currentFolder = parentId ? SmartFavFolderTree.getFolder(currentFolders, parentId) : null;
+
+  const folderRows = displayFolders.map(({ folder, pathLabel }) => `
     <button
       class="folder-item"
       type="button"
-      draggable="true"
+      ${searchingAtRoot ? '' : 'draggable="true"'}
       data-folder-id="${escapeHtml(folder.id)}"
-      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
-      title="${escapeHtml(t('dragFolderHint'))}"
+      ${searchingAtRoot ? '' : `aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"`}
+      title="${escapeHtml(searchingAtRoot ? pathLabel : t('dragFolderHint'))}"
     >
-      <span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>
+      ${searchingAtRoot ? '' : '<span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>'}
       <span class="folder-name">${escapeHtml(folder.name)}</span>
+      ${searchingAtRoot && pathLabel !== folder.name
+    ? `<span class="folder-path">${escapeHtml(pathLabel)}</span>` : ''}
       <span class="folder-count">${escapeHtml(t('folderItemCount', {
     count: getDescendantFavoriteCount(folder.id, favorites)
   }))}</span>
     </button>
-  `).join('') || (parentId
-    // 根层级留白交给 #favoritesEmptyState（带图标和引导按钮）；
-    // 子层级仍用这行内联文案，因为面包屑要留在列表里不能被整块隐藏。
+  `).join('');
+
+  const favoriteRows = orderedFavorites.length
+    ? `<div class="favorite-list-rows">${orderedFavorites.map((favorite) => renderFavoriteRow(favorite, {
+    showCategory: false,
+    inFolder: true
+  })).join('')}</div>`
+    : '';
+
+  // 子层级若子文件夹和收藏都空，给一行内联提示；根层级留白交给 #favoritesEmptyState。
+  const inlineEmpty = (parentId && !childFolders.length && !orderedFavorites.length)
     ? `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`
-    : '')}`;
+    : '';
+
+  elements.foldersList.innerHTML = `
+    ${(!searchingAtRoot && parentId) ? renderFolderBreadcrumb(parentId) : ''}
+    ${(!searchingAtRoot && parentId) ? `<div class="category-header">
+      <div class="category-heading">
+        <span class="category-title">${escapeHtml(currentFolder ? currentFolder.name : '')}</span>
+        <span class="category-count">${escapeHtml(t('favoritesCount', { count: orderedFavorites.length }))}</span>
+      </div>
+    </div>` : ''}
+    ${folderRows}
+    ${favoriteRows}
+    ${inlineEmpty}
+  `;
   favoritesListParentId = parentId;
-  bindFolderInteractions(folders, favorites, parentId);
-  bindBreadcrumbActions(favorites, activeFavoriteOrder);
+  // 搜索态下 displayFolders 可能含其它层级的文件夹，但点击仍走 showFavoritesByCategory→renderFolders，
+  // 能正确导航；不可拖拽（searchingAtRoot 时 HTML 无 draggable），所以拖拽处理器不会误触发。
+  bindFolderInteractions(displayFolders.map((entry) => entry.folder), favorites, parentId);
+  bindBreadcrumbActions();
+  if (orderedFavorites.length) {
+    bindFavoriteActions(elements.foldersList);
+    bindFavoriteReordering(elements.foldersList, parentId);
+  }
   updateEmptyStates();
 }
 
@@ -1797,24 +2469,18 @@ function getDescendantFavoriteCount(folderId, favorites) {
 }
 
 function renderFolderBreadcrumb(folderId) {
-  const path = SmartFavFolderTree.getPath(currentFolders, folderId);
-  return `
-    <nav class="folder-breadcrumb" aria-label="${escapeHtml(t('folderPath'))}">
-      <button type="button" data-folder-id="">${escapeHtml(t('favoriteCategories'))}</button>
-      ${path.map((folder) => `
-        <span aria-hidden="true">›</span>
-        <button type="button" data-folder-id="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</button>
-      `).join('')}
-    </nav>
-  `;
+  // 委托给 folder-nav.js 的统一原语，三个 scope 共用同一套面包屑渲染。
+  return SmartFavFolderNav.renderBreadcrumb(currentFolders, folderId, {
+    rootLabel: t('favoriteCategories'),
+    dataAttr: 'data-folder-id'
+  });
 }
 
-function bindBreadcrumbActions(favorites, favoriteOrder) {
+function bindBreadcrumbActions() {
   elements.foldersList.querySelectorAll('.folder-breadcrumb button').forEach((button) => {
     button.addEventListener('click', () => {
-      const folderId = button.dataset.folderId || null;
-      if (!folderId) renderFolders();
-      else showFavoritesByCategory(folderId, favorites, favoriteOrder);
+      // 合并后统一走 renderFolders：根按钮 folderId 为空 → 根层级。
+      renderFolders(button.dataset.folderId || null);
     });
   });
 }
@@ -2247,12 +2913,11 @@ async function permanentlyDeleteRecentlyDeleted(trashId) {
   }
 }
 
-function showFavoritesByCategory(folderId, favorites, favoriteOrder = activeFavoriteOrder) {
-  activeFavoriteCategory = folderId;
-  activeFavoriteOrder = normalizeFavoriteOrderMap(favoriteOrder);
-  elements.recentSection.classList.add('hidden');
-  elements.foldersHeading.classList.add('hidden');
-  renderFavoriteList(folderId, favorites, activeFavoriteOrder);
+// 形态合并后 showFavoritesByCategory 与 renderFavoriteList 都委托给 renderFolders。
+// 保留这两个函数名是因为全项目有 ~10 处调用点，逐个改调用点风险大于收益；
+// 它们现在只是薄封装，多传的 favorites/favoriteOrder 参数被忽略，renderFolders 自己重取最新。
+function showFavoritesByCategory(folderId) {
+  renderFolders(folderId);
 }
 
 function applyFavoriteOrderById(favorites, folderId, orderedIds) {
@@ -2265,52 +2930,8 @@ function applyFavoriteOrderById(favorites, folderId, orderedIds) {
   return [...direct.filter((favorite) => !orderedSet.has(favorite.id)), ...ordered];
 }
 
-function renderFavoriteList(folderId, favorites, favoriteOrder = activeFavoriteOrder) {
-  const folder = SmartFavFolderTree.getFolder(currentFolders, folderId);
-  if (!folder) {
-    renderFolders();
-    return;
-  }
-  const orderedFavorites = applyFavoriteOrderById(favorites, folderId, favoriteOrder[folderId]);
-  const childFolders = SmartFavFolderTree.childrenOf(currentFolders, folderId);
-  elements.foldersList.classList.add('list-view');
-  elements.foldersList.innerHTML = `
-    ${renderFolderBreadcrumb(folderId)}
-    <div class="category-header">
-      <button class="back-button" id="backToFolders" type="button">${escapeHtml(t('backToCategories'))}</button>
-      <div class="category-heading">
-        <span class="category-title">${escapeHtml(folder.name)}</span>
-        <span class="category-count">${escapeHtml(t('favoritesCount', { count: orderedFavorites.length }))}</span>
-      </div>
-    </div>
-    ${childFolders.length ? `<div class="nested-folder-grid">
-      ${childFolders.map((child) => `
-        <button class="folder-item nested-folder-item" type="button" draggable="true" data-folder-id="${escapeHtml(child.id)}">
-          <span class="reorder-grip folder-reorder-grip" aria-hidden="true"></span>
-          <span class="folder-name">${escapeHtml(child.name)}</span>
-          <span class="folder-count">${escapeHtml(t('folderItemCount', {
-    count: getDescendantFavoriteCount(child.id, favorites)
-  }))}</span>
-        </button>
-      `).join('')}
-    </div>` : ''}
-    <div class="favorite-list-rows">
-      ${orderedFavorites.length
-        ? orderedFavorites.map((favorite) => renderFavoriteRow(favorite, {
-          showCategory: false,
-          inFolder: true
-        })).join('')
-        : `<div class="empty-state">${escapeHtml(t('emptyCategory'))}</div>`}
-    </div>
-  `;
-  document.getElementById('backToFolders').addEventListener('click', () => {
-    if (folder.parentId) showFavoritesByCategory(folder.parentId, favorites, favoriteOrder);
-    else renderFolders();
-  });
-  bindBreadcrumbActions(favorites, favoriteOrder);
-  bindFolderInteractions(childFolders, favorites, folderId);
-  bindFavoriteActions(elements.foldersList);
-  bindFavoriteReordering(elements.foldersList, folderId);
+function renderFavoriteList(folderId) {
+  renderFolders(folderId);
 }
 
 function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } = {}) {
@@ -2400,6 +3021,7 @@ function renderFavoriteRow(favorite, { showCategory = true, inFolder = false } =
 }
 
 function bindFavoriteActions(container) {
+  initDynamicThemedSelectControls(container);
   container.querySelectorAll('.favicon').forEach((image) => {
     image.addEventListener('error', () => image.remove(), { once: true });
   });
@@ -2423,6 +3045,7 @@ function bindFavoriteActions(container) {
       const targetFolderId = select.value;
       if (!targetFolderId) return;
       select.disabled = true;
+      syncDynamicThemedSelect(select);
       const moved = await moveFavoriteToCategory(
         select.dataset.favoriteId,
         targetFolderId
@@ -2430,6 +3053,7 @@ function bindFavoriteActions(container) {
       if (!moved) {
         select.disabled = false;
         select.value = '';
+        syncDynamicThemedSelect(select);
       }
     });
   });
@@ -2701,7 +3325,7 @@ function bindFavoriteReordering(container, folderId) {
     }
 
     row.addEventListener('dragstart', (event) => {
-      if (event.target.closest('.favorite-delete-button, .favorite-move-select')) {
+      if (event.target.closest('.favorite-delete-button, .favorite-move-select, .themed-select-control')) {
         event.preventDefault();
         return;
       }
@@ -2863,20 +3487,34 @@ elements.classificationLearningRememberBtn.addEventListener(
   rememberClassificationLearning
 );
 elements.settingsBtn.addEventListener('click', () => {
+  if (activeView === 'folderPicker') {
+    closeFolderDestinationPicker();
+    return;
+  }
   showView(activeView === 'home' ? 'settings' : 'home');
 });
 
+function setPrimaryViewVisibility(view) {
+  elements.mainView.classList.toggle('hidden', view !== 'home');
+  elements.favoritesView.classList.toggle('hidden', view !== 'favorites');
+  elements.categoriesView.classList.toggle('hidden', view !== 'categories');
+  elements.folderPickerView.classList.toggle('hidden', view !== 'folderPicker');
+  elements.trashView.classList.toggle('hidden', view !== 'trash');
+  elements.settingsView.classList.toggle('hidden', view !== 'settings');
+}
+
 async function showView(view) {
   setCategorySelectOpen(false);
+  closeSettingsSelectControls();
+  closeDynamicThemedSelectControl();
+  activeFolderPicker = null;
+  folderPickerParentId = null;
+  folderPickerQuery = '';
   activeView = ['home', 'favorites', 'categories', 'trash', 'settings'].includes(view)
     ? view
     : 'home';
   if (activeView !== 'favorites') hideClassificationLearningPrompt();
-  elements.mainView.classList.toggle('hidden', activeView !== 'home');
-  elements.favoritesView.classList.toggle('hidden', activeView !== 'favorites');
-  elements.categoriesView.classList.toggle('hidden', activeView !== 'categories');
-  elements.trashView.classList.toggle('hidden', activeView !== 'trash');
-  elements.settingsView.classList.toggle('hidden', activeView !== 'settings');
+  setPrimaryViewVisibility(activeView);
   applyLanguage();
 
   if (activeView === 'favorites') {
@@ -2896,6 +3534,9 @@ async function showView(view) {
 
 function setSettingsGroupCollapsed(group, collapsed) {
   if (!group) return;
+  if (collapsed && group.classList.contains('has-open-settings-select')) {
+    closeSettingsSelectControls();
+  }
   group.classList.toggle('collapsed', collapsed);
   group.querySelector('.settings-group-header')
     ?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
@@ -2963,10 +3604,9 @@ const searchScopes = {
     timer: null,
     input: () => elements.favoritesSearchInput,
     clearBtn: () => elements.favoritesSearchClear,
-    // renderFolders 是异步的，且它自己会在写完 DOM 后调用 updateEmptyStates，
-    // 这里只需要等它完成。
+    // 形态合并后只有一种视图，直接重渲染当前层级即可。
     refresh: async () => {
-      await renderFolders(favoritesListParentId);
+      await renderFolders(activeFavoriteCategory);
     }
   },
   categories: {
@@ -3054,20 +3694,20 @@ function toggleEmptyState(list, emptyEl, noResultsEl, counts, query) {
 
 // 渲染后统一刷新三个视图的空状态。
 function updateEmptyStates() {
-  // 只有根层级的文件夹树才适用"还没有收藏"；子层级和"按分类看收藏"
-  // （list-view）都有自己的上下文，不能套用整站级别的空状态。
   const favoritesQuery = searchScopes.favorites.query;
-  const inFolderTreeRoot = favoritesListParentId === null
-    && Boolean(elements.foldersList)
-    && !elements.foldersList.classList.contains('list-view');
-  const favoritesCounts = applySearchFilter(elements.foldersList, '.folder-item', favoritesQuery);
-  toggleEmptyState(
-    null,
-    elements.favoritesEmptyState,
-    elements.favoritesNoResults,
-    inFolderTreeRoot ? favoritesCounts : { total: 1, visible: 1 },
+  // 合并后只有一种形态：子文件夹行（.folder-item）+ 本层收藏行（.favorite-row-card）同列。
+  // 根层级的"一条都没有"才适用整站级 #favoritesEmptyState；
+  // 子层级的"空"由 renderFolders 渲染的内联块负责，这里只额外管"搜索无结果"。
+  const atRoot = favoritesListParentId === null;
+  const counts = applySearchFilter(
+    elements.foldersList,
+    '.folder-item, .favorite-row-card',
     favoritesQuery
   );
+  const isEmpty = counts.total === 0 && !Boolean(favoritesQuery);
+  const isNoMatch = Boolean(favoritesQuery) && counts.visible === 0;
+  elements.favoritesEmptyState?.classList.toggle('hidden', !(atRoot && isEmpty));
+  elements.favoritesNoResults?.classList.toggle('hidden', !isNoMatch);
 
   // 分类列表里还有面包屑节点，不能整块隐藏，所以 list 传 null。
   const categoriesQuery = searchScopes.categories.query;
@@ -3124,6 +3764,7 @@ function populateCompactSettings() {
   updateAppearancePreview();
   updatePopupSizeLabels();
   updateBackgroundImagePreview();
+  refreshSettingsSelectControls({ renderOptions: true });
   refreshBookmarkRestorePoints();
   initSettingsGroupToggles();
 }
@@ -3426,6 +4067,7 @@ function populateCategoryManager() {
   }));
   categoryKeywordSuggestionCounts = {};
   elements.compactNewCategory.value = '';
+  showCategoryCreateStatus();
   renderCategoryRules();
   elements.categorySettingsStatus.textContent = '';
   elements.categorySettingsStatus.className = 'compact-settings-status';
@@ -4182,6 +4824,7 @@ async function applyAIOrganizationSelection() {
 }
 
 function renderCategoryRules() {
+  closeDynamicThemedSelectControl();
   const breadcrumb = activeCategoryParentId
     ? renderCategoryManagerBreadcrumb(activeCategoryParentId)
     : '';
@@ -4227,28 +4870,29 @@ function renderCategoryRules() {
         >${escapeHtml(formatKeywords(item.keywords))}</textarea>
       </label>
       <div class="category-folder-actions">
-        <label>
+        <div class="category-folder-action">
           <span>${escapeHtml(t('moveFolderTo'))}</span>
-          <select class="category-parent-select" data-folder-id="${escapeHtml(item.id)}">
+          <select class="category-parent-select" data-folder-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('moveFolderTo'))}">
             <option value="">${escapeHtml(t('favoriteCategories'))}</option>
             ${parentOptions.map((folder) => `
               <option value="${escapeHtml(folder.id)}"${folder.id === item.parentId ? ' selected' : ''}>${escapeHtml(getFolderPathLabel(folder.id))}</option>
             `).join('')}
           </select>
-        </label>
-        <label>
+        </div>
+        <div class="category-folder-action">
           <span>${escapeHtml(t('deleteMoveTo'))}</span>
-          <select class="category-delete-target" data-folder-id="${escapeHtml(item.id)}">
-            <option value="">${escapeHtml(t('chooseFolder'))}</option>
+          <select class="category-delete-target" data-folder-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('deleteMoveTo'))}">
+            <option value="" disabled>${escapeHtml(t('chooseFolder'))}</option>
             ${parentOptions.map((folder) => `
               <option value="${escapeHtml(folder.id)}"${folder.id === deleteDefault ? ' selected' : ''}>${escapeHtml(getFolderPathLabel(folder.id))}</option>
             `).join('')}
           </select>
-        </label>
+        </div>
       </div>
     </div>
   `;
   }).join('');
+  initDynamicThemedSelectControls(elements.categoryRulesList);
   updateEmptyStates();
 }
 
@@ -4268,6 +4912,7 @@ function renderCategoryManagerBreadcrumb(folderId) {
 async function addCategoryFolder() {
   const name = elements.compactNewCategory.value.trim();
   if (!name) {
+    showCategoryCreateStatus(t('folderNameRequired'), 'error');
     elements.compactNewCategory.focus();
     return;
   }
@@ -4275,7 +4920,7 @@ async function addCategoryFolder() {
     folder: { parentId: activeCategoryParentId, name, keywords: [], source: 'user' }
   });
   if (!response || response.status !== 'ok') {
-    showCategorySettingsStatus(
+    showCategoryCreateStatus(
       describeFolderError(response, 'duplicateCategory', { conflict: 'duplicateCategory' }),
       'error'
     );
@@ -4284,9 +4929,8 @@ async function addCategoryFolder() {
   await loadFolderState();
   elements.compactNewCategory.value = '';
   populateCategoryManager();
-  showCategorySettingsStatus(t('categoryAdded'), 'success');
-  const newRuleInput = elements.categoryRulesList.querySelector(`[data-folder-id="${response.folder.id}"] .category-keywords-input`);
-  if (newRuleInput) newRuleInput.focus();
+  showCategoryCreateStatus(t('categoryCreated', { name }), 'success');
+  elements.compactNewCategory.focus({ preventScroll: true });
 }
 
 // 后端 folder 相关接口统一返回 { status, message }，其中 message 是英文调试文案。
@@ -4430,11 +5074,48 @@ elements.categoryKeywordAiAnalyzeBtn.addEventListener(
 );
 elements.aiOrganizationAnalyzeBtn.addEventListener('click', analyzeAIOrganization);
 elements.aiOrganizationApplyBtn.addEventListener('click', applyAIOrganizationSelection);
+elements.folderPickerBackBtn.addEventListener('click', () => closeFolderDestinationPicker());
+elements.folderPickerSearchInput.addEventListener('input', (event) => {
+  folderPickerQuery = event.target.value;
+  renderFolderDestinationPicker();
+});
+elements.folderPickerSearchClear.addEventListener('click', () => {
+  folderPickerQuery = '';
+  elements.folderPickerSearchInput.value = '';
+  renderFolderDestinationPicker();
+  elements.folderPickerSearchInput.focus();
+});
+elements.folderPickerBreadcrumb.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-folder-picker-parent]');
+  if (!button || !activeFolderPicker) return;
+  folderPickerParentId = button.dataset.folderPickerParent || null;
+  folderPickerQuery = '';
+  elements.folderPickerSearchInput.value = '';
+  renderFolderDestinationPicker();
+});
+elements.folderPickerList.addEventListener('click', (event) => {
+  const enterButton = event.target.closest('.folder-picker-enter');
+  if (enterButton && activeFolderPicker) {
+    folderPickerParentId = enterButton.dataset.folderPickerParent || null;
+    folderPickerQuery = '';
+    elements.folderPickerSearchInput.value = '';
+    renderFolderDestinationPicker();
+    return;
+  }
+  const selectButton = event.target.closest('.folder-picker-select');
+  if (selectButton) selectFolderDestination(selectButton.dataset.folderPickerValue || '');
+});
+document.addEventListener('keydown', (event) => {
+  if (activeView !== 'folderPicker' || event.key !== 'Escape') return;
+  event.preventDefault();
+  closeFolderDestinationPicker();
+});
 elements.compactNewCategory.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   addCategoryFolder();
 });
+elements.compactNewCategory.addEventListener('input', () => showCategoryCreateStatus());
 elements.categoryRulesList.addEventListener('input', (event) => {
   if (event.target.classList.contains('category-keywords-input')) {
     updateCategoryKeywordsFromInput(event.target);
@@ -4479,6 +5160,7 @@ elements.categoryRulesList.addEventListener('change', async (event) => {
   const response = await sendRuntimeMessage('moveFolder', { folderId, targetParentId });
   if (!response || response.status !== 'ok') {
     event.target.value = previousParentId || '';
+    syncDynamicThemedSelect(event.target);
     showCategorySettingsStatus(describeFolderError(response, 'categoryMoveFailed'), 'error');
     return;
   }
@@ -4633,4 +5315,9 @@ function showCompactSettingsStatus(message, type) {
 function showCategorySettingsStatus(message, type) {
   elements.categorySettingsStatus.textContent = message;
   elements.categorySettingsStatus.className = `compact-settings-status ${type}`;
+}
+
+function showCategoryCreateStatus(message = '', type = '') {
+  elements.categoryCreateStatus.textContent = message;
+  elements.categoryCreateStatus.className = `category-create-status${type ? ` ${type}` : ''}`;
 }

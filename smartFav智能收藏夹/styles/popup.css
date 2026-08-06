@@ -13,7 +13,10 @@
   --shell-bg: rgba(248, 250, 253, 0.18);
   --surface: rgba(255, 255, 255, 0.18);
   --surface-soft: rgba(247, 249, 252, 0.24);
+  --search-bar-bg: rgba(247, 249, 252, 0.12);
+  --search-input-bg: rgba(255, 255, 255, 0.16);
   --overlay-surface: rgba(255, 255, 255, 0.36);
+  --settings-menu-bg: rgba(244, 248, 253, 0.8);
   --text: #18202a;
   /* 次要文字压在半透明磨砂面上，加深以保住 WCAG AA（4.5:1） */
   --muted: #565f6b;
@@ -67,7 +70,10 @@
   --shell-bg: rgba(15, 20, 28, 0.22);
   --surface: rgba(24, 31, 43, 0.34);
   --surface-soft: rgba(36, 46, 60, 0.46);
+  --search-bar-bg: rgba(24, 31, 43, 0.2);
+  --search-input-bg: rgba(36, 46, 60, 0.34);
   --overlay-surface: rgba(24, 31, 42, 0.9);
+  --settings-menu-bg: rgba(20, 27, 38, 0.84);
   --text: #f6f8fb;
   --muted: #aab4c3;
   --line: rgba(203, 213, 225, 0.16);
@@ -102,6 +108,7 @@
   --surface: #ffffff;
   --surface-soft: #f7f8fb;
   --overlay-surface: #ffffff;
+  --settings-menu-bg: var(--overlay-surface);
   --shell-border: #d9dde4;
   --line: #e5e9ef;
   --control-line: #dce2ea;
@@ -143,6 +150,7 @@
   --surface: #f2f4f7;
   --surface-soft: #e5e8ed;
   --overlay-surface: #f5f6f8;
+  --settings-menu-bg: var(--overlay-surface);
   --text: #20252c;
   --muted: #69717c;
   --line: #d4d9e0;
@@ -187,6 +195,7 @@
   --surface: #0b0d10;
   --surface-soft: #171a1f;
   --overlay-surface: #111419;
+  --settings-menu-bg: var(--overlay-surface);
   --text: #ffffff;
   --muted: #b8bec8;
   --line: #262b33;
@@ -215,6 +224,7 @@
   --surface: #f4e7cb;
   --surface-soft: #ead9b8;
   --overlay-surface: #f7ecd7;
+  --settings-menu-bg: var(--overlay-surface);
   --text: #3f3021;
   --muted: #78664f;
   --line: #d8c39a;
@@ -264,6 +274,14 @@
   --spinner-track: #6e5a41;
   --focus-ring: rgba(226, 178, 115, 0.32);
   --shadow: 0 14px 30px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme="white"],
+:root[data-theme="gray"],
+:root[data-theme="black"],
+:root[data-theme="parchment"] {
+  --search-bar-bg: var(--surface-soft);
+  --search-input-bg: var(--surface);
 }
 
 * {
@@ -347,6 +365,11 @@ select:focus-visible {
   background-size: cover;
 }
 
+:root[data-custom-background="true"] {
+  --search-bar-bg: color-mix(in srgb, var(--custom-surface) 72%, transparent);
+  --search-input-bg: color-mix(in srgb, var(--custom-surface) 88%, transparent);
+}
+
 :root[data-custom-background="true"] .header,
 :root[data-custom-background="true"] .save-card,
 :root[data-custom-background="true"] .content-section,
@@ -362,6 +385,10 @@ select:focus-visible {
 :root[data-theme="glass"] .notice,
 :root[data-theme="glass"] .category-select-button,
 :root[data-theme="glass"] .category-select-menu,
+:root[data-theme="glass"] .themed-select-button,
+:root[data-theme="glass"] .themed-select-menu,
+:root[data-theme="glass"] .settings-select-button,
+:root[data-theme="glass"] .settings-select-menu,
 :root[data-theme="glass"] .page-learning-option,
 :root[data-theme="glass"] .tag,
 :root[data-theme="glass"] .button-secondary,
@@ -385,6 +412,9 @@ select:focus-visible {
 :root[data-theme="glass"] .category-count,
 :root[data-theme="glass"] .favorite-row-card,
 :root[data-theme="glass"] .favorite-move-select,
+:root[data-theme="glass"] .folder-picker-search input,
+:root[data-theme="glass"] .folder-picker-list,
+:root[data-theme="glass"] .folder-picker-row,
 :root[data-theme="glass"] .bookmark-backup-badge,
 :root[data-theme="glass"] .bookmark-actions button,
 :root[data-theme="glass"] input[type="checkbox"] {
@@ -400,13 +430,11 @@ select:focus-visible {
   background: rgba(24, 31, 42, 0.94);
 }
 
-:root[data-theme="glass"] .view-back-row,
-:root[data-theme="glass"] .search-bar {
+:root[data-theme="glass"] .view-back-row {
   background: rgba(248, 250, 253, 0.88);
 }
 
-:root[data-theme="glass"][data-mode="dark"] .view-back-row,
-:root[data-theme="glass"][data-mode="dark"] .search-bar {
+:root[data-theme="glass"][data-mode="dark"] .view-back-row {
   background: rgba(24, 31, 42, 0.9);
 }
 
@@ -884,6 +912,363 @@ select:focus-visible {
   opacity: 1;
 }
 
+/* 列表和分类规则中的动态 select 复用首页分类选择器的自绘交互，
+   原生 select 只继续承担值、change 事件和现有业务逻辑。 */
+.themed-native-select {
+  display: none !important;
+}
+
+.themed-select-control {
+  position: relative;
+  min-width: 0;
+  z-index: 1;
+}
+
+.themed-select-control.is-open {
+  z-index: 92;
+}
+
+.themed-select-button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px 0 9px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+
+.themed-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.themed-select-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.themed-select-control.is-open .themed-select-button svg {
+  transform: rotate(180deg);
+}
+
+.themed-select-button:hover,
+.themed-select-button:focus-visible,
+.themed-select-control.is-open .themed-select-button {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.themed-select-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.themed-select-menu {
+  position: absolute;
+  z-index: 94;
+  top: calc(100% + 5px);
+  left: 0;
+  display: grid;
+  width: max(100%, 168px);
+  max-width: 232px;
+  max-height: 224px;
+  gap: 2px;
+  padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
+  background: var(--settings-menu-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+  box-shadow: 0 14px 30px rgba(18, 28, 45, 0.18);
+  transform-origin: top;
+  animation: categoryMenuIn var(--motion-fast) var(--motion-ease);
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.themed-select-align-right .themed-select-menu,
+.themed-select-control-favorite .themed-select-menu {
+  right: 0;
+  left: auto;
+}
+
+.themed-select-control.is-above .themed-select-menu {
+  top: auto;
+  bottom: calc(100% + 5px);
+  transform-origin: bottom;
+}
+
+:root[data-custom-background="true"] .themed-select-menu {
+  -webkit-backdrop-filter: blur(26px) saturate(148%);
+  backdrop-filter: blur(26px) saturate(148%);
+}
+
+.themed-select-option {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.themed-select-option > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.themed-select-option svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  opacity: 0;
+}
+
+.themed-select-option:hover,
+.themed-select-option:focus-visible {
+  background: var(--surface-soft);
+  outline: none;
+}
+
+.themed-select-option[aria-selected="true"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.themed-select-option[aria-selected="true"] svg {
+  opacity: 1;
+}
+
+.themed-select-control-favorite {
+  width: 100%;
+  min-height: 29px;
+  align-self: stretch;
+}
+
+.themed-select-control-favorite .themed-select-button {
+  height: 100%;
+  min-height: 29px;
+  grid-template-columns: minmax(0, 1fr) 13px;
+  gap: 1px;
+  padding: 0 3px 0 6px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 10px;
+}
+
+.themed-select-control-favorite .themed-select-button svg {
+  width: 13px;
+  height: 13px;
+  stroke: var(--primary);
+}
+
+.themed-select-control-favorite .themed-select-button:hover,
+.themed-select-control-favorite .themed-select-button:focus-visible,
+.themed-select-control-favorite.is-open .themed-select-button {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 2px var(--focus-ring);
+}
+
+.themed-select-control-favorite .themed-select-menu {
+  width: 184px;
+}
+
+/* 设置页不再使用由浏览器绘制的原生展开层。
+   将原 select 保留为唯一数据源，视觉和键盘交互交给这层可主题化控件。 */
+.settings-native-select {
+  display: none;
+}
+
+.settings-select-control {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-select-control.is-open {
+  z-index: 82;
+}
+
+.settings-select-button {
+  display: grid;
+  width: 100%;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 11px;
+  border: 1px solid var(--control-line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+
+.settings-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-select-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.settings-select-button:hover,
+.settings-select-button:focus-visible,
+.settings-select-control.is-open .settings-select-button {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.settings-select-control.is-open .settings-select-button svg {
+  transform: rotate(180deg);
+}
+
+.settings-select-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.settings-select-menu {
+  position: absolute;
+  z-index: 84;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  display: grid;
+  max-height: 224px;
+  gap: 2px;
+  padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--control-line);
+  border-radius: 9px;
+  background: var(--settings-menu-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+  box-shadow: 0 14px 30px rgba(18, 28, 45, 0.18);
+  transform-origin: top;
+  animation: categoryMenuIn var(--motion-fast) var(--motion-ease);
+}
+
+.settings-select-control.is-above .settings-select-menu {
+  top: auto;
+  bottom: calc(100% + 5px);
+  transform-origin: bottom;
+}
+
+:root[data-custom-background="true"] .settings-select-menu {
+  background: var(--settings-menu-bg);
+  -webkit-backdrop-filter: blur(26px) saturate(148%);
+  backdrop-filter: blur(26px) saturate(148%);
+}
+
+.settings-select-option {
+  display: grid;
+  width: 100%;
+  min-height: 32px;
+  grid-template-columns: minmax(0, 1fr) 17px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.settings-select-option > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-select-option svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  opacity: 0;
+}
+
+.settings-select-option:hover,
+.settings-select-option:focus-visible {
+  background: var(--surface-soft);
+  outline: none;
+}
+
+.settings-select-option[aria-selected="true"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.settings-select-option[aria-selected="true"] svg {
+  opacity: 1;
+}
+
 .match-summary,
 .privacy-hint {
   margin: 9px 1px 0;
@@ -1273,6 +1658,278 @@ select:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--surface);
+}
+
+/* 独立目录选择器：移动与删除迁移共用，避免下拉层覆盖后续表单。 */
+.folder-picker-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.folder-picker-topbar {
+  display: flex;
+  flex: 0 0 46px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.folder-picker-topbar h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-back {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-btn);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.folder-picker-back:hover,
+.folder-picker-back:focus-visible {
+  outline: none;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.folder-picker-back svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.folder-picker-search {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  margin: 10px 12px 7px;
+}
+
+.folder-picker-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-btn);
+  outline: none;
+  background: var(--search-input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+}
+
+.folder-picker-search input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.folder-picker-search input::placeholder {
+  color: var(--muted);
+}
+
+.folder-picker-search input::-webkit-search-cancel-button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.folder-picker-search .search-clear-btn {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+}
+
+.folder-picker-breadcrumb {
+  display: flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 14px;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.folder-picker-breadcrumb::-webkit-scrollbar {
+  display: none;
+}
+
+.folder-picker-breadcrumb button {
+  max-width: 150px;
+  overflow: hidden;
+  padding: 4px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-breadcrumb button:hover,
+.folder-picker-breadcrumb button:focus-visible {
+  outline: none;
+  background: var(--primary-soft);
+}
+
+.folder-picker-breadcrumb span {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.folder-picker-hint {
+  flex: 0 0 auto;
+  margin: 3px 14px 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.folder-picker-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0 12px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.folder-picker-row {
+  display: grid;
+  min-height: 50px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.folder-picker-row:last-child {
+  border-bottom: 0;
+}
+
+.folder-picker-select,
+.folder-picker-enter {
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.folder-picker-select {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px 9px 14px;
+  text-align: left;
+}
+
+.folder-picker-row-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.folder-picker-row-copy strong,
+.folder-picker-row-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker-row-copy strong {
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.folder-picker-row-copy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.folder-picker-select:hover,
+.folder-picker-select:focus-visible,
+.folder-picker-enter:hover,
+.folder-picker-enter:focus-visible {
+  background: var(--primary-soft);
+}
+
+.folder-picker-row.is-selected .folder-picker-select {
+  color: var(--primary);
+}
+
+.folder-picker-check {
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.folder-picker-row.is-selected .folder-picker-check {
+  opacity: 1;
+}
+
+.folder-picker-enter {
+  display: grid;
+  width: 42px;
+  place-items: center;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.folder-picker-enter svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.folder-picker-empty {
+  margin: auto 18px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 #mainView {
@@ -2060,6 +2717,25 @@ select:focus-visible {
   margin-top: 10px;
 }
 
+.category-create-status {
+  grid-column: 1 / -1;
+  margin: -1px 2px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.category-create-status:empty {
+  display: none;
+}
+
+.category-create-status.success { color: var(--success); }
+.category-create-status.error { color: var(--danger); }
+
+.category-create-status:not(:empty) {
+  animation: noticeSlideIn var(--motion-base) var(--motion-ease);
+}
+
 .category-add-row input,
 .category-rule-keywords textarea {
   width: 100%;
@@ -2269,8 +2945,7 @@ select:focus-visible {
   flex: 1;
 }
 
-.category-rule-name-field input,
-.category-folder-actions select {
+.category-rule-name-field input {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--control-line);
@@ -2301,21 +2976,43 @@ select:focus-visible {
 .category-folder-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 8px;
   margin-top: 8px;
 }
 
-.category-folder-actions label {
+.category-folder-action {
   display: grid;
+  align-content: start;
   gap: 4px;
   color: var(--muted);
   font-size: 10px;
 }
 
-.category-folder-actions select {
-  min-height: 30px;
-  padding: 0 7px;
-  font-size: 10px;
+.category-rule-item.has-open-themed-select {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.category-rule-item .themed-select-control-compact.is-open .themed-select-menu,
+.category-rule-item .themed-select-control-compact.is-above .themed-select-menu {
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: 100%;
+  max-width: none;
+  max-height: 196px;
+  margin-top: 5px;
+  transform-origin: top;
+}
+
+.favorite-row-card.has-open-themed-select {
+  position: relative;
+  z-index: 90;
+  overflow: visible;
 }
 
 .category-rule-name {
@@ -2470,11 +3167,14 @@ select:focus-visible {
   margin-bottom: 4px;
 }
 
-.nested-folder-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 10px;
+/* 跨层搜索结果里显示的完整路径标签（如"工作 › 客户"） */
+.folder-path {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .folder-item {
@@ -2629,10 +3329,6 @@ select:focus-visible {
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
-}
-
-.folders-list.list-view {
-  display: block;
 }
 
 .category-header {
@@ -2898,6 +3594,13 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
+
+.settings-group.has-open-settings-select,
+.settings-group.has-open-settings-select .settings-group-body {
+  position: relative;
+  z-index: 80;
+  overflow: visible;
+}
 .settings-group:last-of-type {
   border-bottom: none;
 }
@@ -2969,6 +3672,7 @@ select:focus-visible {
 #mainView:not(.hidden),
 #favoritesView:not(.hidden),
 #categoriesView:not(.hidden),
+#folderPickerView:not(.hidden),
 #trashView:not(.hidden),
 #settingsView:not(.hidden) {
   animation: viewFadeIn var(--motion-base) var(--motion-ease);
@@ -3057,7 +3761,7 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  background: var(--surface-soft);
+  background: var(--search-bar-bg);
   /* 复用面板同一套磨砂参数，避免搜索栏和面板"两种玻璃" */
   backdrop-filter: var(--panel-backdrop-filter);
   border-bottom: 1px solid var(--line);
@@ -3069,8 +3773,10 @@ select:focus-visible {
   border-radius: var(--radius-btn);
   padding: 6px 10px;
   font-size: 13px;
-  background: var(--surface);
+  background: var(--search-input-bg);
   color: var(--text);
+  -webkit-backdrop-filter: blur(18px) saturate(138%);
+  backdrop-filter: blur(18px) saturate(138%);
   transition:
     border-color var(--motion-fast) var(--motion-ease),
     box-shadow var(--motion-fast) var(--motion-ease);
